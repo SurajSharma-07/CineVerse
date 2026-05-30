@@ -135,7 +135,25 @@ export function MovieApp() {
   const recScrollRef = useRef<HTMLDivElement>(null);
 
   const { scrollYProgress } = useScroll();
-  const [particles] = useState(generateParticles);
+  
+  const [isMobile, setIsMobile] = useState(false);
+  const [particles, setParticles] = useState<{ id: number; left: string; size: number; speed: string; delay: string; }[]>([]);
+  const [topN, setTopN] = useState(10);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setParticles([]);
+      } else {
+        setParticles(generateParticles());
+      }
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => { const h = () => setScrolled(window.scrollY > 60); window.addEventListener('scroll',h); return ()=>window.removeEventListener('scroll',h); }, []);
 
@@ -255,6 +273,105 @@ export function MovieApp() {
 
   const scrollCarousel = (ref: React.RefObject<HTMLDivElement|null>, dir: 'left'|'right') => { ref.current?.scrollBy({left:dir==='left'?-600:600,behavior:'smooth'}); };
 
+  // Aggregated Leaderboard Movies based on owner's list and guest recommendations
+  const leaderboardMovies = React.useMemo(() => {
+    const movieGroups: Record<string, {
+      title: string;
+      thumbnailUrl: string;
+      thumbnailKey: string | null;
+      aspectRatio: '16:9' | '9:16';
+      score: number;
+      watchedCount: number;
+      watchLaterCount: number;
+      recommendationCount: number;
+      recommenders: string[];
+      alreadyInWatchLater: boolean;
+      alreadyInWatched: boolean;
+    }> = {};
+
+    const safeMovies = Array.isArray(movies) ? movies : [];
+    const safeRecommendations = Array.isArray(recommendations) ? recommendations : [];
+
+    // 1. Process owner's movies (Watched = 12pts, Watch Later = 6pts)
+    safeMovies.forEach((m: any) => {
+      const normalizedTitle = m.title.trim().toLowerCase();
+      const points = m.collection === 'watched' ? 12 : 6;
+      
+      if (!movieGroups[normalizedTitle]) {
+        movieGroups[normalizedTitle] = {
+          title: m.title,
+          thumbnailUrl: m.thumbnailUrl,
+          thumbnailKey: m.thumbnailKey,
+          aspectRatio: m.aspectRatio || '16:9',
+          score: 0,
+          watchedCount: 0,
+          watchLaterCount: 0,
+          recommendationCount: 0,
+          recommenders: [],
+          alreadyInWatchLater: false,
+          alreadyInWatched: false,
+        };
+      }
+      
+      movieGroups[normalizedTitle].score += points;
+      if (m.collection === 'watched') {
+        movieGroups[normalizedTitle].watchedCount += 1;
+        movieGroups[normalizedTitle].alreadyInWatched = true;
+      } else {
+        movieGroups[normalizedTitle].watchLaterCount += 1;
+        movieGroups[normalizedTitle].alreadyInWatchLater = true;
+      }
+    });
+
+    // 2. Process recommendations (Points = 20 - rank, min 1pt)
+    safeRecommendations.forEach((r: any) => {
+      const normalizedTitle = r.title.trim().toLowerCase();
+      const points = Math.max(1, 20 - r.rank);
+      
+      if (!movieGroups[normalizedTitle]) {
+        movieGroups[normalizedTitle] = {
+          title: r.title,
+          thumbnailUrl: r.thumbnailUrl,
+          thumbnailKey: r.thumbnailKey,
+          aspectRatio: '16:9',
+          score: 0,
+          watchedCount: 0,
+          watchLaterCount: 0,
+          recommendationCount: 0,
+          recommenders: [],
+          alreadyInWatchLater: false,
+          alreadyInWatched: false,
+        };
+      }
+      
+      movieGroups[normalizedTitle].score += points;
+      movieGroups[normalizedTitle].recommendationCount += 1;
+      if (r.recommendedBy && !movieGroups[normalizedTitle].recommenders.includes(r.recommendedBy)) {
+        movieGroups[normalizedTitle].recommenders.push(r.recommendedBy);
+      }
+    });
+
+    // Convert back to array and sort by score descending, then alphabetically by title
+    return Object.values(movieGroups)
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+  }, [movies, recommendations]);
+
+  const topRankedMovies = leaderboardMovies.slice(0, topN);
+
+  const handleQuickAdd = async (title: string, thumbnailUrl: string, thumbnailKey: string | null) => {
+    try {
+      await addMut.mutateAsync({
+        title,
+        thumbnailUrl,
+        thumbnailKey,
+        aspectRatio: '16:9',
+        collection: 'watchLater',
+      });
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to add movie');
+    }
+  };
+
   const watched = movies.filter((m: Movie) => m.collection === 'watched');
   const watchLater = movies.filter((m: Movie) => m.collection === 'watchLater');
   const featured = watchLater[0]||watched[0]||null;
@@ -284,10 +401,18 @@ export function MovieApp() {
         <div className="flex items-center gap-3">
           <div className="relative"><Film className="w-7 h-7 text-neon-purple animate-pulse-glow" /><Sparkles className="w-3.5 h-3.5 text-neon-cyan absolute -top-1 -right-1" /></div>
           <span className="text-lg font-bold font-display tracking-wider bg-gradient-to-r from-white via-neon-purple to-neon-cyan bg-clip-text text-transparent">CINEVERSE</span>
+          
+          {/* Navigation Links */}
+          <nav className="hidden lg:flex items-center gap-6 ml-8 text-[10px] font-black uppercase tracking-[0.15em] text-gray-400">
+            <button onClick={scrollTo} className="hover:text-white transition-colors cursor-pointer">Collections</button>
+            <button onClick={() => document.getElementById('absolute-cinema')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Absolute Cinema</button>
+            <button onClick={() => document.getElementById('leaderboard')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"><Trophy className="w-3.5 h-3.5 text-yellow-500 animate-pulse" /> Leaderboard</button>
+            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer">Recommendations</button>
+          </nav>
         </div>
         <div className="flex items-center gap-3">
           {isReadOnly ? (
-            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span>Recommend Movie</span></button>
+            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span className="hidden sm:inline">Recommend Movie</span><span className="sm:hidden">Recommend</span></button>
           ) : (
             <button onClick={openAdd} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-blue text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Plus className="w-4 h-4" /><span className="hidden sm:inline">Add Movie</span></button>
           )}
@@ -327,6 +452,57 @@ export function MovieApp() {
              </div>}
         </motion.section>
 
+        {/* Absolute Cinema Section */}
+        <motion.section id="absolute-cinema" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-12 border-t border-white/5 bg-gradient-to-b from-red-950/10 via-black/10 to-transparent">
+          <div className="flex justify-between items-center px-6 md:px-12 mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-red-600/10 flex items-center justify-center border border-red-500/20 animate-pulse"><Sparkles className="w-4 h-4 text-red-500" /></div>
+              <div><h2 className="text-xl md:text-2xl font-black text-white font-display uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-neon-cyan to-white">Absolute Cinema</h2><p className="text-[11px] text-gray-500">Your top-notch masterpieces, crowned and verified</p></div>
+            </div>
+            <span className="text-red-500 text-xs font-black bg-red-950/40 border border-red-800/30 px-3 py-1 rounded-full shadow-neon-pink">🏆 HALL OF FAME</span>
+          </div>
+
+          {watched.length === 0 ? (
+            <div className="mx-6 md:mx-12 glassmorphism rounded-2xl p-12 text-center border border-red-500/10 flex flex-col items-center justify-center">
+              <Trophy className="w-10 h-10 text-red-600/40 mb-3 animate-bounce" />
+              <h3 className="text-base font-bold text-gray-300 mb-1">Your Hall of Fame is empty</h3>
+              <p className="text-sm text-gray-500">Move a movie to your Watched collection to crown it as an Absolute Cinema masterpiece!</p>
+            </div>
+          ) : (
+            <div className="flex gap-6 overflow-x-auto scrollbar-hide px-6 md:px-12 pb-6">
+              {watched.map((m: Movie, i: number) => (
+                <motion.div 
+                  key={`abs-${m.id}`} 
+                  initial={{opacity:0,scale:0.9,y:30}}
+                  whileInView={{opacity:1,scale:1,y:0}}
+                  viewport={{once:true}}
+                  transition={{duration:0.5,delay:i*0.1}}
+                  className="relative group shrink-0 w-[280px] bg-gradient-to-b from-zinc-900 to-black rounded-3xl p-3 border border-red-500/10 hover:border-red-500/30 transition-all hover:shadow-[0_0_20px_rgba(229,9,20,0.15)] flex flex-col gap-3"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl" />
+                  
+                  {/* Thumbnail with respected aspect ratio to prevent breaking/distortion */}
+                  <div className={`relative overflow-hidden rounded-2xl bg-black/40 border border-white/5 ${m.aspectRatio === '9:16' ? 'aspect-[9/13]' : 'aspect-video'}`}>
+                    <img src={getImageUrl(m.thumbnailUrl)} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <div className="absolute top-2 left-2 flex items-center gap-1 text-[8px] font-black px-2 py-0.5 rounded-full bg-red-600/90 border border-red-500/40 text-white tracking-widest uppercase shadow-md">
+                      <Film className="w-2.5 h-2.5" /> Absolute Cinema
+                    </div>
+                  </div>
+
+                  {/* Title & Info */}
+                  <div className="flex flex-col gap-1 px-1">
+                    <h3 className="text-sm font-extrabold text-white font-display tracking-wide leading-tight truncate">{m.title}</h3>
+                    <div className="flex justify-between items-center text-[10px] text-gray-500 mt-1">
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-red-500" /> {new Date(m.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
+                      <span className="text-yellow-400 font-extrabold flex items-center gap-0.5">★★★★★</span>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </motion.section>
+
         {/* Watched */}
         <motion.section initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-10">
           <div className="flex justify-between items-center px-6 md:px-12 mb-6">
@@ -345,6 +521,134 @@ export function MovieApp() {
                </div>
                <button onClick={()=>scrollCarousel(wScrollRef,'right')} className="absolute right-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-l from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/car2:opacity-100 transition-opacity cursor-pointer"><ChevronRight className="w-7 h-7 text-white" /></button>
              </div>}
+        </motion.section>
+
+        {/* Global Cinematic Leaderboard (Dynamic Rankings) */}
+        <motion.section id="leaderboard" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-12 border-t border-white/5 bg-black/10">
+          <div className="flex justify-between items-center px-6 md:px-12 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center border border-yellow-500/20"><Trophy className="w-4 h-4 text-yellow-400" /></div>
+              <div><h2 className="text-xl md:text-2xl font-extrabold text-white font-display">Global Leaderboard</h2><p className="text-[11px] text-gray-500">Live dynamic ranking of CineVerse masterpieces based on user-wide votes & logs</p></div>
+            </div>
+            <span className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-bold px-3 py-1 rounded-full">{leaderboardMovies.length} Ranked</span>
+          </div>
+
+          <div className="max-w-6xl mx-auto px-6 md:px-12">
+            {/* Interactive Slider to adjust N */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/5 border border-white/5 rounded-2xl p-4 md:p-6 mb-8">
+              <div className="flex flex-col gap-1">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-neon-purple animate-pulse" /> Adjust Ranking Depth
+                </h3>
+                <p className="text-[11px] text-gray-400">Control how many cinematic masterpieces to list (N &lt; 30)</p>
+              </div>
+              <div className="flex items-center gap-4 min-w-[240px]">
+                <input 
+                  type="range" 
+                  min={3} 
+                  max={29} 
+                  value={topN} 
+                  onChange={(e) => setTopN(Number(e.target.value))} 
+                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-neon-purple focus:outline-none"
+                />
+                <span className="bg-neon-purple/20 border border-neon-purple/30 text-neon-cyan font-bold font-display px-3 py-1 rounded-xl text-xs min-w-[70px] text-center shadow-neon-purple">
+                  Top {topN}
+                </span>
+              </div>
+            </div>
+
+            {/* Leaderboard Stack */}
+            {isLoading || isRecsLoading ? (
+              <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-purple animate-spin" /></div>
+            ) : topRankedMovies.length === 0 ? (
+              <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center"><Trophy className="w-10 h-10 text-gray-600 mb-3" /><h3 className="text-base font-bold text-gray-300 mb-1">Leaderboard is empty</h3><p className="text-sm text-gray-500">Log movies or add recommendations to populate the rankings!</p></div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {topRankedMovies.map((movie, index) => {
+                  const rank = index + 1;
+                  const isTop3 = rank <= 3;
+                  const scoreBadgeColor = isTop3 
+                    ? rank === 1 ? 'bg-yellow-500/20 border-yellow-500/60 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]'
+                    : rank === 2 ? 'bg-slate-300/20 border-slate-300/60 text-slate-200'
+                    : 'bg-amber-700/20 border-amber-700/60 text-amber-500'
+                    : 'bg-white/5 border-white/10 text-gray-400';
+                  
+                  return (
+                    <motion.div 
+                      key={movie.title}
+                      initial={{ opacity: 0, x: -20 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.4) }}
+                      className="glassmorphism rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-white/5 hover:border-white/10 hover:bg-white/[0.03] transition-all"
+                    >
+                      <div className="flex items-center gap-4 w-full sm:w-auto">
+                        {/* Rank Number */}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-display font-black text-lg ${
+                          rank === 1 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-black shadow-lg shadow-yellow-500/20'
+                          : rank === 2 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-black'
+                          : rank === 3 ? 'bg-gradient-to-br from-amber-600 to-amber-800 text-white'
+                          : 'bg-white/5 border border-white/10 text-gray-400'
+                        }`}>
+                          #{rank}
+                        </div>
+
+                        {/* Thumbnail with respected aspect ratio to prevent breaking/distortion */}
+                        <div className={`rounded-lg overflow-hidden bg-black/40 border border-white/5 shrink-0 flex items-center justify-center transition-all ${
+                          movie.aspectRatio === '9:16' ? 'w-10 h-15 shadow-[0_0_8px_rgba(255,255,255,0.05)]' : 'w-20 h-11 shadow-[0_0_8px_rgba(255,255,255,0.05)]'
+                        }`}>
+                          <img src={getImageUrl(movie.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
+                        </div>
+
+                        {/* Title and stats */}
+                        <div className="flex flex-col min-w-0">
+                          <h4 className="text-sm font-bold text-white font-display truncate pr-2">{movie.title}</h4>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {movie.alreadyInWatched && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-green-400 uppercase tracking-wider">Watched</span>
+                            )}
+                            {movie.alreadyInWatchLater && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-neon-purple/10 border border-neon-purple/20 text-neon-cyan uppercase tracking-wider">Queued</span>
+                            )}
+                            {movie.recommendationCount > 0 && (
+                              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-neon-blue/10 border border-neon-blue/20 text-white flex items-center gap-1">
+                                <User className="w-2.5 h-2.5 text-neon-cyan" /> {movie.recommendationCount} {movie.recommendationCount === 1 ? 'Recommendation' : 'Recommendations'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right side stats & action */}
+                      <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0 shrink-0">
+                        {/* CineScore Tag */}
+                        <div className={`text-[10px] font-black px-3 py-1 rounded-full border tracking-wide uppercase font-display shrink-0 ${scoreBadgeColor}`}>
+                          CineScore: {movie.score}
+                        </div>
+
+                        {/* Action buttons */}
+                        {isReadOnly ? (
+                          <div className="w-8" />
+                        ) : movie.alreadyInWatched || movie.alreadyInWatchLater ? (
+                          <div className="w-8 h-8 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center text-green-400" title="Already in collection">
+                            <Check className="w-4 h-4" />
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={() => handleQuickAdd(movie.title, movie.thumbnailUrl, movie.thumbnailKey)}
+                            className="w-8 h-8 rounded-full bg-neon-purple hover:bg-neon-purple/80 text-white border border-white/10 flex items-center justify-center cursor-pointer transition-all hover:scale-105 shadow-neon-purple"
+                            title="Add to Watch Later"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </motion.section>
 
         {/* Friend Recommendations & Submission Board */}

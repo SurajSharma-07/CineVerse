@@ -41,6 +41,7 @@ export default function MovieCard({
   const isLandscape = movie.aspectRatio === '16:9';
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     const card = e.currentTarget;
     const rect = card.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -56,6 +57,7 @@ export default function MovieCard({
   };
 
   const handleMouseLeave = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     const card = e.currentTarget;
     card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)';
     card.style.transition = 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.3s, box-shadow 0.3s';
@@ -89,7 +91,7 @@ export default function MovieCard({
 
         {/* Hover Actions Overlay - Hidden in Read Only Mode */}
         {!isReadOnly && (
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-end justify-center gap-3 pb-4">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-300 flex items-end justify-center gap-3 pb-4">
             <button onClick={() => onMove(movie.id)} disabled={isMoving}
               title={movie.collection === 'watchLater' ? 'Move to Watched' : 'Move to Watch Later'}
               className="w-9 h-9 rounded-full bg-white text-bg-dark hover:bg-neon-purple hover:text-white flex items-center justify-center transition-all hover:scale-110 cursor-pointer disabled:opacity-50">

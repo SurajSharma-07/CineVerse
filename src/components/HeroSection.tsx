@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import { Play, Plus, Star, ChevronDown, Sparkles } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import type { Movie } from './MovieCard';
@@ -17,10 +18,18 @@ export default function HeroSection({ featuredMovie, onBrowse, onAdd, isReadOnly
   const contentOpacity = useTransform(scrollY, [0, 450], [1, 0]);
   const contentY = useTransform(scrollY, [0, 450], [0, -80]);
 
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   return (
     <section className="relative min-h-[100vh] w-full overflow-hidden flex flex-col justify-end px-6 md:px-16 pb-24 md:pb-36 pt-32">
       {/* Parallax Background */}
-      <motion.div style={{ y: imgY, scale: imgScale }} className="absolute inset-[-10%] w-[120%] h-[120%] pointer-events-none">
+      <motion.div style={isMobile ? {} : { y: imgY, scale: imgScale }} className={isMobile ? "absolute inset-0 w-full h-full pointer-events-none" : "absolute inset-[-10%] w-[120%] h-[120%] pointer-events-none"}>
         {featuredMovie ? (
           <img src={getImageUrl(featuredMovie.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
         ) : (
@@ -37,7 +46,7 @@ export default function HeroSection({ featuredMovie, onBrowse, onAdd, isReadOnly
       <div className="absolute inset-0 shadow-[inset_0_0_200px_60px_rgba(7,7,8,0.85)] pointer-events-none" />
 
       {/* Hero Content */}
-      <motion.div style={{ opacity: contentOpacity, y: contentY }}
+      <motion.div style={isMobile ? {} : { opacity: contentOpacity, y: contentY }}
         className="relative w-full z-10 max-w-5xl">
 
         <motion.div initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3, duration: 0.7 }}>
@@ -55,7 +64,7 @@ export default function HeroSection({ featuredMovie, onBrowse, onAdd, isReadOnly
 
         <motion.h1 initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.9, ease: 'easeOut' }}
-          className="text-5xl sm:text-7xl md:text-8xl lg:text-[7rem] font-black font-display text-white mb-5 uppercase tracking-tight leading-[0.9] max-w-4xl">
+          className="text-4xl xs:text-5xl sm:text-7xl md:text-8xl lg:text-[7rem] font-black font-display text-white mb-5 uppercase tracking-tight leading-[0.9] max-w-4xl break-words">
           {featuredMovie?.title || 'CINEVERSE'}
         </motion.h1>
 

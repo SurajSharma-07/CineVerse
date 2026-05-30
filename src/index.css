@@ -82,6 +82,14 @@ h1, h2, h3, h4, h5, h6 {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+@media (max-width: 768px) {
+  .glassmorphism {
+    background: rgba(19, 17, 18, 0.92);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+}
+
 /* 3D Card System */
 .card-perspective { perspective: 1000px; }
 .card-preserve-3d {
@@ -99,6 +107,7 @@ h1, h2, h3, h4, h5, h6 {
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
