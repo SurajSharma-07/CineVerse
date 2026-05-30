@@ -392,9 +392,11 @@ export function MovieApp() {
       <motion.div className="fixed top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-neon-purple via-neon-blue to-neon-pink z-[60] origin-left" style={{scaleX:scrollYProgress}} />
 
       {/* Particles */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        {particles.map(p=><div key={p.id} className={`absolute bg-white rounded-full ${p.speed}`} style={{left:p.left,width:p.size,height:p.size,animationDelay:p.delay,bottom:'-20px',opacity:0.25}} />)}
-      </div>
+      {!isMobile && (
+        <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+          {particles.map(p=><div key={p.id} className={`absolute bg-white rounded-full ${p.speed}`} style={{left:p.left,width:p.size,height:p.size,animationDelay:p.delay,bottom:'-20px',opacity:0.25}} />)}
+        </div>
+      )}
 
       {/* Navbar */}
       <header className={`fixed top-0 w-full z-50 transition-all duration-500 px-6 md:px-12 flex justify-between items-center ${scrolled?'bg-bg-dark/95 backdrop-blur-xl border-b border-white/5 py-3':'bg-gradient-to-b from-bg-dark/85 to-transparent py-5'}`}>
