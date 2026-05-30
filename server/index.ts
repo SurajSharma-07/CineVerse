@@ -22,9 +22,9 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Enable CORS with support for frontend dev servers
+// Enable CORS with support for frontend dev servers and Vercel cloud domains
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: true, // Dynamically mirrors request origin (localhost & Vercel)
   credentials: true,
 }));
 
