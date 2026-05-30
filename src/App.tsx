@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Check, X, UploadCloud, Video, Smartphone, Sparkles, Film, Clock, Compass, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Trophy, Award, Send, User } from 'lucide-react';
+import { Plus, Trash2, Check, X, UploadCloud, Video, Smartphone, Sparkles, Film, Clock, Compass, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 import { trpc } from './trpc';
 import { AnimatePresence, motion, useScroll } from 'framer-motion';
 import HeroSection from './components/HeroSection';
@@ -22,16 +22,6 @@ const generateParticles = () => Array.from({length:30},(_,i)=>({
 }));
 
 interface Toast { id: string; type: 'success'|'error'|'info'; message: string; }
-
-interface Recommendation {
-  id: string;
-  title: string;
-  thumbnailUrl: string;
-  thumbnailKey: string | null;
-  rank: number;
-  recommendedBy: string;
-  createdAt: Date | string;
-}
 
 export function MovieApp() {
   const utils = trpc.useContext();
@@ -56,16 +46,25 @@ export function MovieApp() {
   const moveMut = trpc.moveCollection.useMutation({ onSuccess: (_,v) => { utils.getMovies.invalidate(); showToast('success',`Moved to ${v.collection==='watched'?'Watched':'Watch Later'}!`); }, onError: (e) => showToast('error', e.message) });
   const titleMut = trpc.editTitle.useMutation({ onSuccess: () => { utils.getMovies.invalidate(); }, onError: (e) => showToast('error', e.message) });
 
-  // Recommendations Mutation
+  // Absolute Cinema (Top Rank) Mutations
   const addRecMut = trpc.addRecommendation.useMutation({
     onSuccess: () => {
       utils.getRecommendations.invalidate();
-      showToast('success', 'Recommendation submitted successfully!');
+      showToast('success', 'Masterpiece added to rankings!');
       setRecTitle('');
-      setRecName('');
       setRecRank(1);
       setRecFile(null);
       setRecPreview('');
+      setAddRankOpen(false);
+    },
+    onError: (e) => showToast('error', e.message),
+  });
+
+  const editRecMut = trpc.editRecommendation.useMutation({
+    onSuccess: () => {
+      utils.getRecommendations.invalidate();
+      showToast('success', 'Ranking updated successfully!');
+      setEditingRecId(null);
     },
     onError: (e) => showToast('error', e.message),
   });
@@ -73,33 +72,10 @@ export function MovieApp() {
   const delRecMut = trpc.deleteRecommendation.useMutation({
     onSuccess: () => {
       utils.getRecommendations.invalidate();
-      showToast('success', 'Recommendation removed.');
+      showToast('success', 'Movie removed from rankings.');
     },
     onError: (e) => showToast('error', e.message),
   });
-
-  const handleApproveRec = async (rec: Recommendation) => {
-    try {
-      await addMut.mutateAsync({
-        title: rec.title,
-        thumbnailUrl: rec.thumbnailUrl,
-        thumbnailKey: rec.thumbnailKey,
-        aspectRatio: '16:9',
-        collection: 'watchLater',
-      });
-      await delRecMut.mutateAsync({ id: rec.id });
-      showToast('success', `Approved: "${rec.title}" added to Watch Later!`);
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      showToast('error', error.message || 'Approval failed');
-    }
-  };
-
-  const handleRejectRec = async (id: string) => {
-    if (confirm('Are you sure you want to reject and remove this recommendation?')) {
-      await delRecMut.mutateAsync({ id });
-    }
-  };
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -118,27 +94,31 @@ export function MovieApp() {
   const [existKey, setExistKey] = useState<string|null>(null);
   const [dragActive, setDragActive] = useState(false);
   
-  // Friend Recommendation Form states
+  // Absolute Cinema (Top Rank) states
   const [recTitle, setRecTitle] = useState('');
-  const [recName, setRecName] = useState('');
   const [recRank, setRecRank] = useState<number>(1);
   const [recFile, setRecFile] = useState<File|null>(null);
   const [recPreview, setRecPreview] = useState('');
   const [recUploading, setRecUploading] = useState(false);
-  const [recDragActive, setRecDragActive] = useState(false);
+
+  const [addRankOpen, setAddRankOpen] = useState(false);
+  const [editingRecId, setEditingRecId] = useState<string|null>(null);
+  const [editRecTitle, setEditRecTitle] = useState('');
+  const [editRecRank, setEditRecRank] = useState<number>(1);
+  const [editRecFile, setEditRecFile] = useState<File|null>(null);
+  const [editRecPreview, setEditRecPreview] = useState('');
+  const [editRecUploading, setEditRecUploading] = useState(false);
 
   const [scrolled, setScrolled] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const recFileRef = useRef<HTMLInputElement>(null);
   const wlScrollRef = useRef<HTMLDivElement>(null);
   const wScrollRef = useRef<HTMLDivElement>(null);
-  const recScrollRef = useRef<HTMLDivElement>(null);
 
   const { scrollYProgress } = useScroll();
   
   const [isMobile, setIsMobile] = useState(false);
   const [particles, setParticles] = useState<{ id: number; left: string; size: number; speed: string; delay: string; }[]>([]);
-  const [topN, setTopN] = useState(10);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -187,26 +167,17 @@ export function MovieApp() {
     r.readAsDataURL(f);
   };
 
-  const handleDrag = (e: React.DragEvent, isRec: boolean = false) => {
+  const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isRec) {
-      setRecDragActive(e.type==='dragenter'||e.type==='dragover');
-    } else {
-      setDragActive(e.type==='dragenter'||e.type==='dragover');
-    }
+    setDragActive(e.type==='dragenter'||e.type==='dragover');
   };
 
-  const handleDrop = (e: React.DragEvent, isRec: boolean = false) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isRec) {
-      setRecDragActive(false);
-      if(e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0], true);
-    } else {
-      setDragActive(false);
-      if(e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0], false);
-    }
+    setDragActive(false);
+    if(e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0], false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -230,14 +201,13 @@ export function MovieApp() {
     } catch(err: unknown){ const error = err instanceof Error ? err : new Error(String(err)); showToast('error', error.message || 'Error'); } finally { setUploading(false); }
   };
 
-  // Handle recommendation submit
+  // Handle ranking submit (Create)
   const handleRecSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if(!recTitle.trim()){showToast('error','Movie title is required!');return;}
-    if(!recName.trim()){showToast('error','Your name is required!');return;}
     setRecUploading(true);
     
-    // Default movie frame if friend doesn't upload a keyframe
+    // Default movie frame if user doesn't upload a keyframe
     let url = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800&auto=format&fit=crop&q=80';
     let key: string | null = null;
     
@@ -257,13 +227,49 @@ export function MovieApp() {
         thumbnailUrl: url,
         thumbnailKey: key,
         rank: recRank,
-        recommendedBy: recName.trim(),
+        recommendedBy: 'Cinematic Explorer', // Purely user-owned rankings
       });
     } catch(err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
-      showToast('error', error.message || 'Error submitting recommendation');
+      showToast('error', error.message || 'Error creating ranked movie');
     } finally {
       setRecUploading(false);
+    }
+  };
+
+  // Handle ranking edit (Update)
+  const handleRecEditSubmit = async (id: string, existUrl: string, existKey: string | null) => {
+    if(!editRecTitle.trim()){showToast('error','Movie title is required!');return;}
+    setEditRecUploading(true);
+    
+    let url = existUrl;
+    let key = existKey;
+    
+    try {
+      if (editRecFile) {
+        const fd = new FormData();
+        fd.append('thumbnail', editRecFile);
+        const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
+        if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+        const d = await r.json();
+        url = d.url;
+        key = d.key;
+      }
+      
+      await editRecMut.mutateAsync({
+        id,
+        title: editRecTitle.trim(),
+        rank: editRecRank,
+        thumbnailUrl: url,
+        thumbnailKey: key,
+      });
+      setEditRecFile(null);
+      setEditRecPreview('');
+    } catch(err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      showToast('error', error.message || 'Error updating ranked movie');
+    } finally {
+      setEditRecUploading(false);
     }
   };
 
@@ -273,118 +279,11 @@ export function MovieApp() {
 
   const scrollCarousel = (ref: React.RefObject<HTMLDivElement|null>, dir: 'left'|'right') => { ref.current?.scrollBy({left:dir==='left'?-600:600,behavior:'smooth'}); };
 
-  // Aggregated Leaderboard Movies based on owner's list and guest recommendations
-  const leaderboardMovies = React.useMemo(() => {
-    const movieGroups: Record<string, {
-      title: string;
-      thumbnailUrl: string;
-      thumbnailKey: string | null;
-      aspectRatio: '16:9' | '9:16';
-      score: number;
-      watchedCount: number;
-      watchLaterCount: number;
-      recommendationCount: number;
-      recommenders: string[];
-      alreadyInWatchLater: boolean;
-      alreadyInWatched: boolean;
-    }> = {};
-
-    const safeMovies = Array.isArray(movies) ? movies : [];
-    const safeRecommendations = Array.isArray(recommendations) ? recommendations : [];
-
-    // 1. Process owner's movies (Watched = 12pts, Watch Later = 6pts)
-    safeMovies.forEach((m: any) => {
-      const normalizedTitle = m.title.trim().toLowerCase();
-      const points = m.collection === 'watched' ? 12 : 6;
-      
-      if (!movieGroups[normalizedTitle]) {
-        movieGroups[normalizedTitle] = {
-          title: m.title,
-          thumbnailUrl: m.thumbnailUrl,
-          thumbnailKey: m.thumbnailKey,
-          aspectRatio: m.aspectRatio || '16:9',
-          score: 0,
-          watchedCount: 0,
-          watchLaterCount: 0,
-          recommendationCount: 0,
-          recommenders: [],
-          alreadyInWatchLater: false,
-          alreadyInWatched: false,
-        };
-      }
-      
-      movieGroups[normalizedTitle].score += points;
-      if (m.collection === 'watched') {
-        movieGroups[normalizedTitle].watchedCount += 1;
-        movieGroups[normalizedTitle].alreadyInWatched = true;
-      } else {
-        movieGroups[normalizedTitle].watchLaterCount += 1;
-        movieGroups[normalizedTitle].alreadyInWatchLater = true;
-      }
-    });
-
-    // 2. Process recommendations (Points = 20 - rank, min 1pt)
-    safeRecommendations.forEach((r: any) => {
-      const normalizedTitle = r.title.trim().toLowerCase();
-      const points = Math.max(1, 20 - r.rank);
-      
-      if (!movieGroups[normalizedTitle]) {
-        movieGroups[normalizedTitle] = {
-          title: r.title,
-          thumbnailUrl: r.thumbnailUrl,
-          thumbnailKey: r.thumbnailKey,
-          aspectRatio: '16:9',
-          score: 0,
-          watchedCount: 0,
-          watchLaterCount: 0,
-          recommendationCount: 0,
-          recommenders: [],
-          alreadyInWatchLater: false,
-          alreadyInWatched: false,
-        };
-      }
-      
-      movieGroups[normalizedTitle].score += points;
-      movieGroups[normalizedTitle].recommendationCount += 1;
-      if (r.recommendedBy && !movieGroups[normalizedTitle].recommenders.includes(r.recommendedBy)) {
-        movieGroups[normalizedTitle].recommenders.push(r.recommendedBy);
-      }
-    });
-
-    // Convert back to array and sort by score descending, then alphabetically by title
-    return Object.values(movieGroups)
-      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  }, [movies, recommendations]);
-
-  const topRankedMovies = leaderboardMovies.slice(0, topN);
-
-  const handleQuickAdd = async (title: string, thumbnailUrl: string, thumbnailKey: string | null) => {
-    try {
-      await addMut.mutateAsync({
-        title,
-        thumbnailUrl,
-        thumbnailKey,
-        aspectRatio: '16:9',
-        collection: 'watchLater',
-      });
-    } catch (err: any) {
-      showToast('error', err.message || 'Failed to add movie');
-    }
-  };
-
   const watched = movies.filter((m: Movie) => m.collection === 'watched');
   const watchLater = movies.filter((m: Movie) => m.collection === 'watchLater');
   const featured = watchLater[0]||watched[0]||null;
 
   const cardProps = (m: Movie) => ({ movie:m, onEdit:openEdit, onDelete:setDelMovie, onMove:(id:string)=>moveMut.mutate({id,collection:m.collection==='watched'?'watchLater':'watched'}), isMoving:moveMut.isPending&&moveMut.variables?.id===m.id, inlineEditingId:inlineId, inlineTitleValue:inlineVal, setInlineTitleValue:setInlineVal, startInlineEdit:startInline, cancelInlineEdit:cancelInline, saveInlineEdit:saveInline });
-
-  // Help display rank badges beautifully
-  const getRankBadge = (rank: number) => {
-    if (rank === 1) return { text: '1st Rank', icon: <Trophy className="w-3.5 h-3.5" />, className: 'bg-yellow-500/20 border-yellow-500/60 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]' };
-    if (rank === 2) return { text: '2nd Rank', icon: <Award className="w-3.5 h-3.5" />, className: 'bg-slate-300/20 border-slate-300/60 text-slate-200' };
-    if (rank === 3) return { text: '3rd Rank', icon: <Award className="w-3.5 h-3.5" />, className: 'bg-amber-700/20 border-amber-700/60 text-amber-500' };
-    return { text: `${rank}th Rank`, icon: <Award className="w-3.5 h-3.5" />, className: 'bg-white/5 border-white/10 text-gray-400' };
-  };
 
   return (
     <div className="min-h-screen bg-bg-dark text-white overflow-x-hidden">
@@ -408,13 +307,11 @@ export function MovieApp() {
           <nav className="hidden lg:flex items-center gap-6 ml-8 text-[10px] font-black uppercase tracking-[0.15em] text-gray-400">
             <button onClick={scrollTo} className="hover:text-white transition-colors cursor-pointer">Collections</button>
             <button onClick={() => document.getElementById('absolute-cinema')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Absolute Cinema</button>
-            <button onClick={() => document.getElementById('leaderboard')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"><Trophy className="w-3.5 h-3.5 text-yellow-500 animate-pulse" /> Leaderboard</button>
-            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer">Recommendations</button>
           </nav>
         </div>
         <div className="flex items-center gap-3">
           {isReadOnly ? (
-            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span className="hidden sm:inline">Recommend Movie</span><span className="sm:hidden">Recommend</span></button>
+            <button onClick={() => document.getElementById('absolute-cinema')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span className="hidden sm:inline">Absolute Cinema</span><span className="sm:hidden">Rankings</span></button>
           ) : (
             <button onClick={openAdd} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-blue text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Plus className="w-4 h-4" /><span className="hidden sm:inline">Add Movie</span></button>
           )}
@@ -454,55 +351,180 @@ export function MovieApp() {
              </div>}
         </motion.section>
 
-        {/* Absolute Cinema Section */}
-        <motion.section id="absolute-cinema" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-12 border-t border-white/5 bg-gradient-to-b from-red-950/10 via-black/10 to-transparent">
+        {/* Absolute Cinema (Top Rankings) Section */}
+        <motion.section id="absolute-cinema" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-12 border-t border-white/5 bg-gradient-to-b from-black/20 to-transparent">
           <div className="flex justify-between items-center px-6 md:px-12 mb-8">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-red-600/10 flex items-center justify-center border border-red-500/20 animate-pulse"><Sparkles className="w-4 h-4 text-red-500" /></div>
-              <div><h2 className="text-xl md:text-2xl font-black text-white font-display uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-neon-cyan to-white">Absolute Cinema</h2><p className="text-[11px] text-gray-500">Your top-notch masterpieces, crowned and verified</p></div>
+              <div className="w-9 h-9 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20"><Trophy className="w-4 h-4 text-red-500 animate-pulse" /></div>
+              <div><h2 className="text-xl md:text-2xl font-black text-white font-display uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-neon-cyan to-white">Absolute Cinema</h2><p className="text-[11px] text-gray-500">Your top-notch personal movie rankings (N &lt; 30)</p></div>
             </div>
-            <span className="text-red-500 text-xs font-black bg-red-950/40 border border-red-800/30 px-3 py-1 rounded-full shadow-neon-pink">🏆 HALL OF FAME</span>
+            {!isReadOnly && (
+              <button onClick={() => setAddRankOpen(!addRankOpen)} className="flex items-center gap-1.5 bg-red-600/15 hover:bg-red-600/30 text-red-400 text-xs font-black border border-red-500/30 px-3 py-1.5 rounded-xl cursor-pointer transition-all shadow-neon-pink">
+                {addRankOpen ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                <span>{addRankOpen ? 'Cancel' : 'Add Rank'}</span>
+              </button>
+            )}
           </div>
 
-          {watched.length === 0 ? (
-            <div className="mx-6 md:mx-12 glassmorphism rounded-2xl p-12 text-center border border-red-500/10 flex flex-col items-center justify-center">
-              <Trophy className="w-10 h-10 text-red-600/40 mb-3 animate-bounce" />
-              <h3 className="text-base font-bold text-gray-300 mb-1">Your Hall of Fame is empty</h3>
-              <p className="text-sm text-gray-500">Move a movie to your Watched collection to crown it as an Absolute Cinema masterpiece!</p>
-            </div>
-          ) : (
-            <div className="flex gap-6 overflow-x-auto scrollbar-hide px-6 md:px-12 pb-6">
-              {watched.map((m: Movie, i: number) => (
-                <motion.div 
-                  key={`abs-${m.id}`} 
-                  initial={{opacity:0,scale:0.9,y:30}}
-                  whileInView={{opacity:1,scale:1,y:0}}
-                  viewport={{once:true}}
-                  transition={{duration:0.5,delay:i*0.1}}
-                  className="relative group shrink-0 w-[280px] bg-gradient-to-b from-zinc-900 to-black rounded-3xl p-3 border border-red-500/10 hover:border-red-500/30 transition-all hover:shadow-[0_0_20px_rgba(229,9,20,0.15)] flex flex-col gap-3"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl" />
-                  
-                  {/* Thumbnail with respected aspect ratio to prevent breaking/distortion */}
-                  <div className={`relative overflow-hidden rounded-2xl bg-black/40 border border-white/5 ${m.aspectRatio === '9:16' ? 'aspect-[9/13]' : 'aspect-video'}`}>
-                    <img src={getImageUrl(m.thumbnailUrl)} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                    <div className="absolute top-2 left-2 flex items-center gap-1 text-[8px] font-black px-2 py-0.5 rounded-full bg-red-600/90 border border-red-500/40 text-white tracking-widest uppercase shadow-md">
-                      <Film className="w-2.5 h-2.5" /> Absolute Cinema
+          <div className="max-w-4xl mx-auto px-6 md:px-12">
+            {/* Minimalistic Inline Add Form */}
+            {addRankOpen && !isReadOnly && (
+              <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} className="glassmorphism rounded-2xl border border-white/10 p-5 mb-8 flex flex-col gap-4">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5"><Plus className="w-4 h-4 text-red-500" /> Add Movie to Rankings</h3>
+                <form onSubmit={handleRecSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                  <div className="md:col-span-4 flex flex-col gap-1.5">
+                    <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Movie Title</label>
+                    <input type="text" required placeholder="e.g. Inception" value={recTitle} onChange={e=>setRecTitle(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-red-500 transition-all" />
+                  </div>
+
+                  <div className="md:col-span-3 flex flex-col gap-1.5">
+                    <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Pick Rank</label>
+                    <select value={recRank} onChange={e=>setRecRank(Number(e.target.value))} className="w-full bg-bg-card border border-white/5 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-red-500 transition-all">
+                      {Array.from({length: 29}, (_, i) => i + 1).map(num => (
+                        <option key={num} value={num}>🏆 Rank #{num}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="md:col-span-3 flex flex-col gap-1.5">
+                    <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Keyframe Poster (Optional)</label>
+                    <div onClick={()=>recFileRef.current?.click()} className="w-full bg-white/5 border border-dashed border-white/10 hover:border-red-500/50 rounded-xl px-3 py-2 text-gray-500 text-center cursor-pointer transition-all truncate text-[10px] font-semibold flex items-center justify-center gap-1.5 h-[34px]">
+                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], true)}} className="hidden" />
+                      {recPreview ? <img src={recPreview} alt="" className="w-6 h-4 object-cover rounded" /> : <UploadCloud className="w-3.5 h-3.5 text-red-500" />}
+                      <span>{recFile ? recFile.name : 'Upload Poster'}</span>
                     </div>
                   </div>
 
-                  {/* Title & Info */}
-                  <div className="flex flex-col gap-1 px-1">
-                    <h3 className="text-sm font-extrabold text-white font-display tracking-wide leading-tight truncate">{m.title}</h3>
-                    <div className="flex justify-between items-center text-[10px] text-gray-500 mt-1">
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-red-500" /> {new Date(m.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
-                      <span className="text-yellow-400 font-extrabold flex items-center gap-0.5">★★★★★</span>
-                    </div>
+                  <div className="md:col-span-2">
+                    <button type="submit" disabled={recUploading} className="w-full bg-gradient-to-r from-red-600 to-neon-pink text-white font-bold py-2 rounded-xl border border-white/10 shadow-neon-pink flex items-center justify-center gap-1.5 cursor-pointer text-xs disabled:opacity-50 transition-all h-[34px]">
+                      {recUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>Add</span>
+                    </button>
                   </div>
-                </motion.div>
-              ))}
-            </div>
-          )}
+                </form>
+              </motion.div>
+            )}
+
+            {/* Rankings Stack */}
+            {isRecsLoading ? (
+              <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-purple animate-spin" /></div>
+            ) : recommendations.length === 0 ? (
+              <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center"><Trophy className="w-10 h-10 text-gray-600 mb-3 animate-pulse" /><h3 className="text-base font-bold text-gray-300 mb-1">No ranked movies yet</h3><p className="text-sm text-gray-500">Curations are waiting. Crown your favorite movies as Absolute Cinema!</p></div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {[...recommendations].sort((a: any, b: any) => a.rank - b.rank).map((rec: any, index: number) => {
+                  const isEditing = editingRecId === rec.id;
+                  
+                  return (
+                    <motion.div 
+                      key={rec.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.4) }}
+                      className="glassmorphism rounded-2xl p-3 flex flex-col md:flex-row items-center justify-between gap-4 border border-white/5 hover:border-red-500/20 hover:bg-white/[0.01] transition-all"
+                    >
+                      {/* Left: Rank, Image and Title */}
+                      <div className="flex items-center gap-4 w-full md:w-auto min-w-0">
+                        {/* Rank Badge */}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-display font-black text-sm shrink-0 ${
+                          rec.rank === 1 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-black shadow-lg shadow-yellow-500/20'
+                          : rec.rank === 2 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-black'
+                          : rec.rank === 3 ? 'bg-gradient-to-br from-amber-600 to-amber-800 text-white'
+                          : 'bg-white/5 border border-white/10 text-gray-400'
+                        }`}>
+                          #{rec.rank}
+                        </div>
+
+                        {/* Thumbnail (Aspect Ratio Protected) */}
+                        <div className="w-12 h-8 rounded overflow-hidden bg-black/40 border border-white/5 shrink-0">
+                          <img src={getImageUrl(rec.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
+                        </div>
+
+                        {/* Details */}
+                        {isEditing ? (
+                          <div className="flex flex-col sm:flex-row gap-3 w-full sm:items-center">
+                            <input 
+                              type="text" 
+                              required 
+                              value={editRecTitle} 
+                              onChange={e=>setEditRecTitle(e.target.value)} 
+                              className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-white text-xs focus:outline-none focus:border-red-500 min-w-[160px]" 
+                            />
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-black text-gray-500 uppercase">Rank:</span>
+                              <select 
+                                value={editRecRank} 
+                                onChange={e=>setEditRecRank(Number(e.target.value))} 
+                                className="bg-bg-card border border-white/5 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-red-500"
+                              >
+                                {Array.from({length: 29}, (_, i) => i + 1).map(num => (
+                                  <option key={num} value={num}>#{num}</option>
+                                ))}
+                              </select>
+                            </div>
+                            
+                            {/* Edit Thumbnail */}
+                            <div onClick={()=>fileRef.current?.click()} className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg px-2 py-1 text-gray-400 text-[10px] cursor-pointer flex items-center gap-1">
+                              <input ref={fileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0]) { setEditRecFile(e.target.files[0]); const r=new FileReader(); r.onloadend=()=>setEditRecPreview(r.result as string); r.readAsDataURL(e.target.files[0]); }}} className="hidden" />
+                              {editRecPreview ? <img src={editRecPreview} alt="" className="w-5 h-3.5 object-cover rounded" /> : <UploadCloud className="w-3 h-3 text-red-500" />}
+                              <span>{editRecFile ? 'Replaced' : 'Poster'}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col min-w-0">
+                            <h4 className="text-sm font-bold text-white font-display truncate leading-snug">{rec.title}</h4>
+                            <span className="text-[9px] font-medium text-gray-500 uppercase tracking-widest mt-0.5">Absolute Cinema Log</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-2 w-full md:w-auto justify-end border-t md:border-t-0 border-white/5 pt-2.5 md:pt-0 shrink-0">
+                        {isReadOnly ? (
+                          <span className="text-[9px] font-black text-red-500/60 uppercase tracking-widest bg-red-950/20 border border-red-900/30 px-2 py-0.5 rounded-full"> CROWNED </span>
+                        ) : isEditing ? (
+                          <div className="flex items-center gap-1.5">
+                            <button 
+                              onClick={() => handleRecEditSubmit(rec.id, rec.thumbnailUrl, rec.thumbnailKey)}
+                              disabled={editRecUploading}
+                              className="px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1"
+                            >
+                              {editRecUploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              <span>Save</span>
+                            </button>
+                            <button 
+                              onClick={() => setEditingRecId(null)}
+                              className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-[10px] font-medium cursor-pointer transition-all"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => { setEditingRecId(rec.id); setEditRecTitle(rec.title); setEditRecRank(rec.rank); setEditRecFile(null); setEditRecPreview(''); }}
+                              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5 cursor-pointer"
+                              title="Edit Rank"
+                            >
+                              <Plus className="w-3.5 h-3.5 rotate-45 shrink-0" />
+                            </button>
+                            <button 
+                              onClick={() => { if(confirm(`Remove "${rec.title}" from rankings?`)) delRecMut.mutate({id: rec.id}); }}
+                              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-600 text-gray-400 hover:text-white flex items-center justify-center transition-all border border-white/5 cursor-pointer"
+                              title="Remove"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </motion.section>
 
         {/* Watched */}
@@ -525,252 +547,9 @@ export function MovieApp() {
              </div>}
         </motion.section>
 
-        {/* Global Cinematic Leaderboard (Dynamic Rankings) */}
-        <motion.section id="leaderboard" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-12 border-t border-white/5 bg-black/10">
-          <div className="flex justify-between items-center px-6 md:px-12 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center border border-yellow-500/20"><Trophy className="w-4 h-4 text-yellow-400" /></div>
-              <div><h2 className="text-xl md:text-2xl font-extrabold text-white font-display">Global Leaderboard</h2><p className="text-[11px] text-gray-500">Live dynamic ranking of CineVerse masterpieces based on user-wide votes & logs</p></div>
-            </div>
-            <span className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-bold px-3 py-1 rounded-full">{leaderboardMovies.length} Ranked</span>
-          </div>
 
-          <div className="max-w-6xl mx-auto px-6 md:px-12">
-            {/* Interactive Slider to adjust N */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/5 border border-white/5 rounded-2xl p-4 md:p-6 mb-8">
-              <div className="flex flex-col gap-1">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-neon-purple animate-pulse" /> Adjust Ranking Depth
-                </h3>
-                <p className="text-[11px] text-gray-400">Control how many cinematic masterpieces to list (N &lt; 30)</p>
-              </div>
-              <div className="flex items-center gap-4 min-w-[240px]">
-                <input 
-                  type="range" 
-                  min={3} 
-                  max={29} 
-                  value={topN} 
-                  onChange={(e) => setTopN(Number(e.target.value))} 
-                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-neon-purple focus:outline-none"
-                />
-                <span className="bg-neon-purple/20 border border-neon-purple/30 text-neon-cyan font-bold font-display px-3 py-1 rounded-xl text-xs min-w-[70px] text-center shadow-neon-purple">
-                  Top {topN}
-                </span>
-              </div>
-            </div>
 
-            {/* Leaderboard Stack */}
-            {isLoading || isRecsLoading ? (
-              <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-purple animate-spin" /></div>
-            ) : topRankedMovies.length === 0 ? (
-              <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center"><Trophy className="w-10 h-10 text-gray-600 mb-3" /><h3 className="text-base font-bold text-gray-300 mb-1">Leaderboard is empty</h3><p className="text-sm text-gray-500">Log movies or add recommendations to populate the rankings!</p></div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {topRankedMovies.map((movie, index) => {
-                  const rank = index + 1;
-                  const isTop3 = rank <= 3;
-                  const scoreBadgeColor = isTop3 
-                    ? rank === 1 ? 'bg-yellow-500/20 border-yellow-500/60 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]'
-                    : rank === 2 ? 'bg-slate-300/20 border-slate-300/60 text-slate-200'
-                    : 'bg-amber-700/20 border-amber-700/60 text-amber-500'
-                    : 'bg-white/5 border-white/10 text-gray-400';
-                  
-                  return (
-                    <motion.div 
-                      key={movie.title}
-                      initial={{ opacity: 0, x: -20 }}
-                      whileInView={{ opacity: 1, x: 0 }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.4) }}
-                      className="glassmorphism rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-white/5 hover:border-white/10 hover:bg-white/[0.03] transition-all"
-                    >
-                      <div className="flex items-center gap-4 w-full sm:w-auto">
-                        {/* Rank Number */}
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-display font-black text-lg ${
-                          rank === 1 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-black shadow-lg shadow-yellow-500/20'
-                          : rank === 2 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-black'
-                          : rank === 3 ? 'bg-gradient-to-br from-amber-600 to-amber-800 text-white'
-                          : 'bg-white/5 border border-white/10 text-gray-400'
-                        }`}>
-                          #{rank}
-                        </div>
 
-                        {/* Thumbnail with respected aspect ratio to prevent breaking/distortion */}
-                        <div className={`rounded-lg overflow-hidden bg-black/40 border border-white/5 shrink-0 flex items-center justify-center transition-all ${
-                          movie.aspectRatio === '9:16' ? 'w-10 h-15 shadow-[0_0_8px_rgba(255,255,255,0.05)]' : 'w-20 h-11 shadow-[0_0_8px_rgba(255,255,255,0.05)]'
-                        }`}>
-                          <img src={getImageUrl(movie.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
-                        </div>
-
-                        {/* Title and stats */}
-                        <div className="flex flex-col min-w-0">
-                          <h4 className="text-sm font-bold text-white font-display truncate pr-2">{movie.title}</h4>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {movie.alreadyInWatched && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-green-400 uppercase tracking-wider">Watched</span>
-                            )}
-                            {movie.alreadyInWatchLater && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-neon-purple/10 border border-neon-purple/20 text-neon-cyan uppercase tracking-wider">Queued</span>
-                            )}
-                            {movie.recommendationCount > 0 && (
-                              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-neon-blue/10 border border-neon-blue/20 text-white flex items-center gap-1">
-                                <User className="w-2.5 h-2.5 text-neon-cyan" /> {movie.recommendationCount} {movie.recommendationCount === 1 ? 'Recommendation' : 'Recommendations'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right side stats & action */}
-                      <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0 shrink-0">
-                        {/* CineScore Tag */}
-                        <div className={`text-[10px] font-black px-3 py-1 rounded-full border tracking-wide uppercase font-display shrink-0 ${scoreBadgeColor}`}>
-                          CineScore: {movie.score}
-                        </div>
-
-                        {/* Action buttons */}
-                        {isReadOnly ? (
-                          <div className="w-8" />
-                        ) : movie.alreadyInWatched || movie.alreadyInWatchLater ? (
-                          <div className="w-8 h-8 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center text-green-400" title="Already in collection">
-                            <Check className="w-4 h-4" />
-                          </div>
-                        ) : (
-                          <button 
-                            onClick={() => handleQuickAdd(movie.title, movie.thumbnailUrl, movie.thumbnailKey)}
-                            className="w-8 h-8 rounded-full bg-neon-purple hover:bg-neon-purple/80 text-white border border-white/10 flex items-center justify-center cursor-pointer transition-all hover:scale-105 shadow-neon-purple"
-                            title="Add to Watch Later"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </motion.section>
-
-        {/* Friend Recommendations & Submission Board */}
-        <motion.section id="recommendations" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-10 pb-24 border-t border-white/5 bg-black/25">
-          <div className="px-6 md:px-12 mb-8">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-neon-blue/10 flex items-center justify-center border border-neon-blue/20"><Trophy className="w-4 h-4 text-neon-blue" /></div>
-                <div><h2 className="text-xl md:text-2xl font-extrabold text-white font-display">Friend Recommendations</h2><p className="text-[11px] text-gray-500">Ranked cinematic recommendations by guests</p></div>
-              </div>
-              <span className="text-neon-blue text-xs font-bold bg-neon-blue/10 border border-neon-blue/20 px-3 py-1 rounded-full">{recommendations.length} Recommendations</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-12">
-            {/* Recommendations List Carousel */}
-            <div className="lg:col-span-8 flex flex-col justify-center">
-              {isRecsLoading ? <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-blue animate-spin" /></div>
-              : recommendations.length === 0 ? (
-                <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center h-full"><Trophy className="w-10 h-10 text-gray-600 mb-3" /><h3 className="text-base font-bold text-gray-300 mb-1">No recommendations yet</h3><p className="text-sm text-gray-500">Be the first to recommend a ranked movie!</p></div>
-              ) : (
-                <div className="relative group/rec-car">
-                  <button onClick={()=>scrollCarousel(recScrollRef,'left')} className="absolute left-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-r from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/rec-car:opacity-100 transition-opacity cursor-pointer"><ChevronLeft className="w-7 h-7 text-white" /></button>
-                  <div ref={recScrollRef} className="flex gap-5 overflow-x-auto scrollbar-hide scroll-smooth pb-4">
-                    {recommendations.map((rec: Recommendation, i: number) => {
-                      const badge = getRankBadge(rec.rank);
-                      return (
-                        <motion.div key={rec.id} initial={{opacity:0,scale:0.85,y:30}} whileInView={{opacity:1,scale:1,y:0}} viewport={{once:true}} transition={{duration:0.4,delay:i*0.08}}
-                          className="relative bg-bg-card rounded-2xl overflow-hidden border border-white/5 shadow-md flex-shrink-0 w-[240px] group flex flex-col cursor-pointer transition-all hover:border-neon-blue/30">
-                          
-                          {/* Thumbnail */}
-                          <div className="relative aspect-video overflow-hidden bg-black/40">
-                            <img src={getImageUrl(rec.thumbnailUrl)} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                            {/* Rank Badge */}
-                            <div className={`absolute top-2 left-2 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${badge.className}`}>
-                              {badge.icon}
-                              <span>{badge.text}</span>
-                            </div>
-                            
-                            {/* Admin Moderation Actions */}
-                            {!isReadOnly && (
-                              <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-2 p-3 z-20">
-                                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Review Recommendation</span>
-                                <button onClick={(e) => { e.stopPropagation(); handleApproveRec(rec); }} className="w-full py-1.5 px-3 bg-neon-purple hover:bg-neon-purple/80 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.03] cursor-pointer shadow-neon-purple">
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>Add to Watch Later</span>
-                                </button>
-                                <button onClick={(e) => { e.stopPropagation(); handleRejectRec(rec.id); }} className="w-full py-1.5 px-3 bg-red-600/20 hover:bg-red-600 border border-red-500/30 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.03] cursor-pointer">
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>Reject & Remove</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Footer */}
-                          <div className="p-3 flex flex-col gap-1.5 bg-bg-card z-10">
-                            <h4 className="text-xs font-bold text-white font-display truncate leading-tight group-hover:text-neon-blue transition-colors">{rec.title}</h4>
-                            <div className="flex justify-between items-center text-[10px] text-gray-500">
-                              <span className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-neon-cyan" /> {rec.recommendedBy}</span>
-                              <span className="text-gray-600 font-semibold">{new Date(rec.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                            </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                  <button onClick={()=>scrollCarousel(recScrollRef,'right')} className="absolute right-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-l from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/rec-car:opacity-100 transition-opacity cursor-pointer"><ChevronRight className="w-7 h-7 text-white" /></button>
-                </div>
-              )}
-            </div>
-
-            {/* Recommendation Form Submission Panel */}
-            <div id="recommendation-form" className="lg:col-span-4">
-              <div className="glassmorphism rounded-2xl border border-white/10 p-5 md:p-6 flex flex-col gap-4">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2"><Send className="w-4 h-4 text-neon-blue" /> Recommend a Movie</h3>
-                
-                <form onSubmit={handleRecSubmit} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Your Name</label>
-                    <input type="text" required placeholder="e.g. Nolan Fan" value={recName} onChange={e=>setRecName(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-neon-blue transition-all" />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Movie Title</label>
-                    <input type="text" required placeholder="e.g. The Matrix" value={recTitle} onChange={e=>setRecTitle(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-neon-blue transition-all" />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pick Rank</label>
-                    <select value={recRank} onChange={e=>setRecRank(Number(e.target.value))} className="w-full bg-bg-card border border-white/5 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-neon-blue transition-all">
-                      <option value={1}>🏆 1st Rank (Your Favorite)</option>
-                      <option value={2}>🥈 2nd Rank</option>
-                      <option value={3}>🥉 3rd Rank</option>
-                      <option value={4}>🏅 4th Rank</option>
-                      <option value={5}>🏅 5th Rank</option>
-                      <option value={6}>🏅 6th Rank</option>
-                      <option value={7}>🏅 7th Rank</option>
-                      <option value={8}>🏅 8th Rank</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Upload keyframe (Optional)</label>
-                    <div onDragEnter={e=>handleDrag(e, true)} onDragOver={e=>handleDrag(e, true)} onDragLeave={e=>handleDrag(e, true)} onDrop={e=>handleDrop(e, true)} onClick={()=>recFileRef.current?.click()}
-                      className={`relative w-full border border-dashed rounded-xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center p-4 min-h-[90px] ${recDragActive?'border-neon-blue bg-neon-blue/10':'border-white/5 bg-white/5 hover:border-white/20'}`}>
-                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], true)}} className="hidden" />
-                      {recPreview ? <div className="absolute inset-0"><img src={recPreview} alt="" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity"><UploadCloud className="w-4 h-4 mr-1.5" />Replace</div></div>
-                      : <div className="flex flex-col items-center text-gray-500 p-2"><UploadCloud className="w-5 h-5 text-neon-blue mb-1" /><span className="text-[10px] font-semibold text-white mb-0.5">Drop frame image here</span><span className="text-[9px] text-gray-600">JPEG, PNG (Max 5MB)</span></div>}
-                    </div>
-                  </div>
-
-                  <button type="submit" disabled={recUploading} className="w-full bg-gradient-to-r from-neon-purple to-neon-blue hover:from-neon-blue hover:to-neon-pink text-white font-bold py-2 rounded-xl border border-white/10 shadow-neon-purple flex items-center justify-center gap-1.5 cursor-pointer text-xs disabled:opacity-50 transition-all">
-                    {recUploading?<><RefreshCw className="w-4 h-4 animate-spin" />Submitting...</>:<><Send className="w-4 h-4" />Submit Recommendation</>}
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </motion.section>
       </div>
 
       {/* Add/Edit Modal */}
@@ -796,7 +575,7 @@ export function MovieApp() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Thumbnail</label>
-                <div onDragEnter={e=>handleDrag(e, false)} onDragOver={e=>handleDrag(e, false)} onDragLeave={e=>handleDrag(e, false)} onDrop={e=>handleDrop(e, false)} onClick={()=>fileRef.current?.click()}
+                <div onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop} onClick={()=>fileRef.current?.click()}
                   className={`relative w-full border-2 border-dashed rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center p-6 ${dragActive?'border-neon-purple bg-neon-purple/10':'border-white/10 bg-white/5 hover:border-white/20'} ${formAR==='16:9'?'aspect-video':'aspect-[9/14] max-w-[220px] mx-auto'}`}>
                   <input ref={fileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], false)}} className="hidden" />
                   {formPreview ? <div className="absolute inset-0"><img src={formPreview} alt="" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-sm font-semibold transition-opacity"><UploadCloud className="w-5 h-5 mr-2" />Replace</div></div>

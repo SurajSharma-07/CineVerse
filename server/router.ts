@@ -31,6 +31,15 @@ const recommendationInputSchema = z.object({
   recommendedBy: z.string().min(1, 'Name is required').max(100),
 });
 
+const recommendationEditSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1, 'Title is required').max(255).optional(),
+  thumbnailUrl: z.string().min(1).optional(),
+  thumbnailKey: z.string().nullable().optional(),
+  rank: z.number().int().min(1).optional(),
+  recommendedBy: z.string().min(1).max(100).optional(),
+});
+
 export const appRouter = router({
   // Get all movies for the logged-in user
   getMovies: protectedProcedure.query(async ({ ctx }) => {
@@ -374,6 +383,51 @@ export const appRouter = router({
         saveMockRecommendations(mockRecommendations);
       }
       return { success: true };
+    }),
+
+  // Edit a ranked recommendation (admin/owner managed)
+  editRecommendation: publicProcedure
+    .input(recommendationEditSchema)
+    .mutation(async ({ input }) => {
+      if (isDatabaseConnected && db) {
+        try {
+          console.log(`tRPC: Updating recommendation ${input.id} in database...`);
+          const updateData: Partial<typeof schema.recommendations.$inferInsert> = {};
+          if (input.title) updateData.title = input.title;
+          if (input.rank !== undefined) updateData.rank = input.rank;
+          if (input.thumbnailUrl) updateData.thumbnailUrl = input.thumbnailUrl;
+          if (input.thumbnailKey !== undefined) updateData.thumbnailKey = input.thumbnailKey;
+          if (input.recommendedBy) updateData.recommendedBy = input.recommendedBy;
+
+          await db.update(schema.recommendations)
+            .set(updateData)
+            .where(eq(schema.recommendations.id, input.id));
+            
+          return { success: true };
+        } catch (err) {
+          console.error('Database error in editRecommendation, falling back to mock:', err);
+        }
+      }
+
+      // In-memory fallback
+      console.log(`tRPC: Updating mock recommendation ${input.id}...`);
+      const recIdx = mockRecommendations.findIndex((r) => r.id === input.id);
+      if (recIdx === -1) {
+        throw new Error('Recommendation not found');
+      }
+
+      const existing = mockRecommendations[recIdx];
+      mockRecommendations[recIdx] = {
+        ...existing,
+        title: input.title ?? existing.title,
+        rank: input.rank ?? existing.rank,
+        thumbnailUrl: input.thumbnailUrl ?? existing.thumbnailUrl,
+        thumbnailKey: input.thumbnailKey !== undefined ? input.thumbnailKey : existing.thumbnailKey,
+        recommendedBy: input.recommendedBy ?? existing.recommendedBy,
+      };
+      saveMockRecommendations(mockRecommendations);
+
+      return { success: true, recommendation: mockRecommendations[recIdx] };
     }),
 });
 
