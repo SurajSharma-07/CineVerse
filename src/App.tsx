@@ -282,6 +282,29 @@ export function MovieApp() {
 
   const scrollCarousel = (ref: React.RefObject<HTMLDivElement|null>, dir: 'left'|'right') => { ref.current?.scrollBy({left:dir==='left'?-600:600,behavior:'smooth'}); };
 
+  // Admin: Approve a friend recommendation (add to Watch Later, then remove rec)
+  const handleApproveRec = async (rec: any) => {
+    try {
+      await addMut.mutateAsync({
+        title: rec.title,
+        thumbnailUrl: rec.thumbnailUrl,
+        thumbnailKey: rec.thumbnailKey,
+        aspectRatio: '16:9',
+        collection: 'watchLater',
+      });
+      await delRecMut.mutateAsync({ id: rec.id });
+      showToast('success', `"${rec.title}" added to Watch Later!`);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      showToast('error', error.message || 'Failed to approve recommendation');
+    }
+  };
+
+  // Admin: Reject a friend recommendation (just remove it)
+  const handleRejectRec = (id: string) => {
+    delRecMut.mutate({ id });
+  };
+
   const watched = movies.filter((m: Movie) => m.collection === 'watched');
   const watchLater = movies.filter((m: Movie) => m.collection === 'watchLater');
   const featured = watchLater[0]||watched[0]||null;
@@ -586,6 +609,21 @@ export function MovieApp() {
                             <Trophy className="w-3 h-3" />
                             <span>#{rec.rank}</span>
                           </div>
+                          
+                          {/* Admin Moderation Actions (owner only) */}
+                          {!isReadOnly && (
+                            <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-2 p-3 z-20">
+                              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1">Review Recommendation</span>
+                              <button onClick={(e) => { e.stopPropagation(); handleApproveRec(rec); }} className="w-full py-1.5 px-3 bg-neon-purple hover:bg-neon-purple/80 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.03] cursor-pointer shadow-neon-purple">
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add to Watch Later</span>
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); handleRejectRec(rec.id); }} className="w-full py-1.5 px-3 bg-red-600/20 hover:bg-red-600 border border-red-500/30 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all hover:scale-[1.03] cursor-pointer">
+                                <X className="w-3.5 h-3.5" />
+                                <span>Reject & Remove</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                         {/* Footer */}
                         <div className="p-3 flex flex-col gap-1.5 bg-bg-card z-10">
