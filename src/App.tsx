@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Check, X, UploadCloud, Video, Smartphone, Sparkles, Film, Clock, Compass, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { Plus, Trash2, Check, X, UploadCloud, Video, Smartphone, Sparkles, Film, Clock, Compass, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Trophy, Send, User } from 'lucide-react';
 import { trpc } from './trpc';
 import { AnimatePresence, motion, useScroll } from 'framer-motion';
 import HeroSection from './components/HeroSection';
@@ -100,6 +100,8 @@ export function MovieApp() {
   const [recFile, setRecFile] = useState<File|null>(null);
   const [recPreview, setRecPreview] = useState('');
   const [recUploading, setRecUploading] = useState(false);
+  const [recDragActive, setRecDragActive] = useState(false);
+  const [recName, setRecName] = useState('');
 
   const [addRankOpen, setAddRankOpen] = useState(false);
   const [editingRecId, setEditingRecId] = useState<string|null>(null);
@@ -114,6 +116,7 @@ export function MovieApp() {
   const recFileRef = useRef<HTMLInputElement>(null);
   const wlScrollRef = useRef<HTMLDivElement>(null);
   const wScrollRef = useRef<HTMLDivElement>(null);
+  const recScrollRef = useRef<HTMLDivElement>(null);
 
   const { scrollYProgress } = useScroll();
   
@@ -307,11 +310,12 @@ export function MovieApp() {
           <nav className="hidden lg:flex items-center gap-6 ml-8 text-[10px] font-black uppercase tracking-[0.15em] text-gray-400">
             <button onClick={scrollTo} className="hover:text-white transition-colors cursor-pointer">Collections</button>
             <button onClick={() => document.getElementById('absolute-cinema')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-red-500 animate-pulse" /> Absolute Cinema</button>
+            <button onClick={() => document.getElementById('recommendations')?.scrollIntoView({behavior:'smooth'})} className="hover:text-white transition-colors cursor-pointer">Recommendations</button>
           </nav>
         </div>
         <div className="flex items-center gap-3">
           {isReadOnly ? (
-            <button onClick={() => document.getElementById('absolute-cinema')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span className="hidden sm:inline">Absolute Cinema</span><span className="sm:hidden">Rankings</span></button>
+            <button onClick={() => document.getElementById('recommendation-form')?.scrollIntoView({behavior:'smooth'})} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-pink text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Sparkles className="w-4 h-4" /><span className="hidden sm:inline">Recommend Movie</span><span className="sm:hidden">Recommend</span></button>
           ) : (
             <button onClick={openAdd} className="flex items-center gap-2 bg-gradient-to-r from-neon-purple to-neon-blue text-white font-medium py-2 px-4 rounded-xl border border-white/10 shadow-neon-purple transition-all hover:scale-[1.03] text-sm cursor-pointer"><Plus className="w-4 h-4" /><span className="hidden sm:inline">Add Movie</span></button>
           )}
@@ -547,8 +551,123 @@ export function MovieApp() {
              </div>}
         </motion.section>
 
+        {/* Friend Recommendations & Submission Board */}
+        <motion.section id="recommendations" initial={{opacity:0,y:80}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:'-80px'}} transition={{duration:0.7,ease:'easeOut'}} className="py-10 pb-24 border-t border-white/5 bg-black/25">
+          <div className="px-6 md:px-12 mb-8">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-neon-blue/10 flex items-center justify-center border border-neon-blue/20"><Trophy className="w-4 h-4 text-neon-blue" /></div>
+                <div><h2 className="text-xl md:text-2xl font-extrabold text-white font-display">Friend Recommendations</h2><p className="text-[11px] text-gray-500">Ranked cinematic recommendations by guests</p></div>
+              </div>
+              <span className="text-neon-blue text-xs font-bold bg-neon-blue/10 border border-neon-blue/20 px-3 py-1 rounded-full">{recommendations.length} Recommendations</span>
+            </div>
+          </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-12">
+            {/* Recommendations List Carousel */}
+            <div className="lg:col-span-8 flex flex-col justify-center">
+              {isRecsLoading ? <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-blue animate-spin" /></div>
+              : recommendations.length === 0 ? (
+                <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center h-full"><Trophy className="w-10 h-10 text-gray-600 mb-3" /><h3 className="text-base font-bold text-gray-300 mb-1">No recommendations yet</h3><p className="text-sm text-gray-500">Be the first to recommend a ranked movie!</p></div>
+              ) : (
+                <div className="relative group/rec-car">
+                  <button onClick={()=>scrollCarousel(recScrollRef,'left')} className="absolute left-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-r from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/rec-car:opacity-100 transition-opacity cursor-pointer"><ChevronLeft className="w-7 h-7 text-white" /></button>
+                  <div ref={recScrollRef} className="flex gap-5 overflow-x-auto scrollbar-hide scroll-smooth pb-4">
+                    {[...recommendations].sort((a: any, b: any) => a.rank - b.rank).map((rec: any, i: number) => (
+                      <motion.div key={rec.id} initial={{opacity:0,scale:0.85,y:30}} whileInView={{opacity:1,scale:1,y:0}} viewport={{once:true}} transition={{duration:0.4,delay:i*0.08}}
+                        className="relative bg-bg-card rounded-2xl overflow-hidden border border-white/5 shadow-md flex-shrink-0 w-[240px] group flex flex-col cursor-pointer transition-all hover:border-neon-blue/30">
+                        {/* Thumbnail */}
+                        <div className="relative aspect-video overflow-hidden bg-black/40">
+                          <img src={getImageUrl(rec.thumbnailUrl)} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                          {/* Rank Badge */}
+                          <div className={`absolute top-2 left-2 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${
+                            rec.rank === 1 ? 'bg-yellow-500/20 border-yellow-500/60 text-yellow-400' : rec.rank === 2 ? 'bg-slate-300/20 border-slate-300/60 text-slate-200' : rec.rank === 3 ? 'bg-amber-700/20 border-amber-700/60 text-amber-500' : 'bg-white/5 border-white/10 text-gray-400'
+                          }`}>
+                            <Trophy className="w-3 h-3" />
+                            <span>#{rec.rank}</span>
+                          </div>
+                        </div>
+                        {/* Footer */}
+                        <div className="p-3 flex flex-col gap-1.5 bg-bg-card z-10">
+                          <h4 className="text-xs font-bold text-white font-display truncate leading-tight group-hover:text-neon-blue transition-colors">{rec.title}</h4>
+                          <div className="flex justify-between items-center text-[10px] text-gray-500">
+                            <span className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-neon-cyan" /> {rec.recommendedBy}</span>
+                            <span className="text-gray-600 font-semibold">{new Date(rec.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                  <button onClick={()=>scrollCarousel(recScrollRef,'right')} className="absolute right-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-l from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/rec-car:opacity-100 transition-opacity cursor-pointer"><ChevronRight className="w-7 h-7 text-white" /></button>
+                </div>
+              )}
+            </div>
 
+            {/* Recommendation Form Submission Panel */}
+            <div id="recommendation-form" className="lg:col-span-4">
+              <div className="glassmorphism rounded-2xl border border-white/10 p-5 md:p-6 flex flex-col gap-4">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2"><Send className="w-4 h-4 text-neon-blue" /> Recommend a Movie</h3>
+                
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if(!recName.trim()){showToast('error','Your name is required!');return;}
+                  if(!recTitle.trim()){showToast('error','Movie title is required!');return;}
+                  setRecUploading(true);
+                  let url = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800&auto=format&fit=crop&q=80';
+                  let key: string | null = null;
+                  try {
+                    if (recFile) {
+                      const fd = new FormData();
+                      fd.append('thumbnail', recFile);
+                      const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
+                      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+                      const d = await r.json();
+                      url = d.url; key = d.key;
+                    }
+                    await addRecMut.mutateAsync({ title: recTitle.trim(), thumbnailUrl: url, thumbnailKey: key, rank: recRank, recommendedBy: recName.trim() });
+                    setRecName('');
+                  } catch(err: unknown) {
+                    const error = err instanceof Error ? err : new Error(String(err));
+                    showToast('error', error.message || 'Error submitting recommendation');
+                  } finally { setRecUploading(false); }
+                }} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Your Name</label>
+                    <input type="text" required placeholder="e.g. Nolan Fan" value={recName} onChange={e=>setRecName(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-neon-blue transition-all" />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Movie Title</label>
+                    <input type="text" required placeholder="e.g. The Matrix" value={recTitle} onChange={e=>setRecTitle(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-neon-blue transition-all" />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pick Rank</label>
+                    <select value={recRank} onChange={e=>setRecRank(Number(e.target.value))} className="w-full bg-bg-card border border-white/5 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-neon-blue transition-all">
+                      {Array.from({length: 29}, (_, i) => i + 1).map(num => (
+                        <option key={num} value={num}>🏆 {num === 1 ? '1st Rank (Your Favorite)' : num === 2 ? '2nd Rank' : num === 3 ? '3rd Rank' : `${num}th Rank`}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Upload keyframe (Optional)</label>
+                    <div onDragEnter={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragOver={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragLeave={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false)}} onDrop={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false);if(e.dataTransfer.files?.[0])processFile(e.dataTransfer.files[0], true)}} onClick={()=>recFileRef.current?.click()}
+                      className={`relative w-full border border-dashed rounded-xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center p-4 min-h-[90px] ${recDragActive?'border-neon-blue bg-neon-blue/10':'border-white/5 bg-white/5 hover:border-white/20'}`}>
+                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], true)}} className="hidden" />
+                      {recPreview ? <div className="absolute inset-0"><img src={recPreview} alt="" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity"><UploadCloud className="w-4 h-4 mr-1.5" />Replace</div></div>
+                      : <div className="flex flex-col items-center text-gray-500 p-2"><UploadCloud className="w-5 h-5 text-neon-blue mb-1" /><span className="text-[10px] font-semibold text-white mb-0.5">Drop frame image here</span><span className="text-[9px] text-gray-600">JPEG, PNG (Max 5MB)</span></div>}
+                    </div>
+                  </div>
+
+                  <button type="submit" disabled={recUploading} className="w-full bg-gradient-to-r from-neon-purple to-neon-blue hover:from-neon-blue hover:to-neon-pink text-white font-bold py-2 rounded-xl border border-white/10 shadow-neon-purple flex items-center justify-center gap-1.5 cursor-pointer text-xs disabled:opacity-50 transition-all">
+                    {recUploading?<><RefreshCw className="w-4 h-4 animate-spin" />Submitting...</>:<><Send className="w-4 h-4" />Submit Recommendation</>}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </motion.section>
 
       </div>
 
