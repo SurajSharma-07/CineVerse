@@ -1,5 +1,6 @@
 import React from 'react';
 import { Edit2, Trash2, ArrowLeftRight, Check, X, Clock, RefreshCw } from 'lucide-react';
+import { getImageUrl } from '../utils/url';
 
 interface Movie {
   id: string;
@@ -73,7 +74,7 @@ export default function MovieCard({
       {/* Thumbnail */}
       <div className={`relative overflow-hidden w-full bg-black/40 ${isLandscape ? 'aspect-video' : 'aspect-[9/14]'}`}>
         <img
-          src={movie.thumbnailUrl}
+          src={getImageUrl(movie.thumbnailUrl)}
           alt={movie.title}
           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
           loading="lazy"

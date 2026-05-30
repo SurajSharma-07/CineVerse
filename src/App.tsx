@@ -7,6 +7,7 @@ import MovieCard from './components/MovieCard';
 import type { Movie } from './components/MovieCard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
+import { getImageUrl } from './utils/url';
 
 let toastIdCounter = 0;
 const generateToastId = () => `toast-${++toastIdCounter}`;
@@ -140,7 +141,7 @@ export function MovieApp() {
   const showToast = (type: Toast['type'], message: string) => { const id = generateToastId(); setToasts(p=>[...p,{id,type,message}]); setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),4000); };
   const scrollTo = () => document.getElementById('collections')?.scrollIntoView({behavior:'smooth'});
   const openAdd = () => { setEditingMovie(null); setFormTitle(''); setFormAR('16:9'); setFormFileState(null); setFormPreview(''); setExistUrl(''); setExistKey(null); setModalOpen(true); };
-  const openEdit = (m: Movie) => { setEditingMovie(m); setFormTitle(m.title); setFormAR(m.aspectRatio); setFormFileState(null); setFormPreview(m.thumbnailUrl); setExistUrl(m.thumbnailUrl); setExistKey(m.thumbnailKey); setModalOpen(true); };
+  const openEdit = (m: Movie) => { setEditingMovie(m); setFormTitle(m.title); setFormAR(m.aspectRatio); setFormFileState(null); setFormPreview(getImageUrl(m.thumbnailUrl)); setExistUrl(m.thumbnailUrl); setExistKey(m.thumbnailKey); setModalOpen(true); };
   const closeModal = () => { setModalOpen(false); setEditingMovie(null); setFormFileState(null); setFormPreview(''); setUploading(false); };
 
   const processFile = (f: File, isRec: boolean = false) => {
@@ -375,7 +376,7 @@ export function MovieApp() {
                           
                           {/* Thumbnail */}
                           <div className="relative aspect-video overflow-hidden bg-black/40">
-                            <img src={rec.thumbnailUrl} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                            <img src={getImageUrl(rec.thumbnailUrl)} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
                             {/* Rank Badge */}
                             <div className={`absolute top-2 left-2 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${badge.className}`}>
                               {badge.icon}
@@ -550,7 +551,7 @@ const queryClient = new QueryClient({
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: 'http://localhost:3000/trpc',
+      url: `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/trpc`,
       headers() {
         return {
           Authorization: 'Bearer manus-session-token-xyz123',
