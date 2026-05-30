@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import { getImageUrl } from './utils/url';
 
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 let toastIdCounter = 0;
 const generateToastId = () => `toast-${++toastIdCounter}`;
 
@@ -200,7 +201,7 @@ export function MovieApp() {
       if(formFile){
         const fd=new FormData();
         fd.append('thumbnail',formFile);
-        const r=await fetch('http://localhost:3000/api/upload',{method:'POST',body:fd});
+        const r=await fetch(`${API_BASE_URL}/api/upload`,{method:'POST',body:fd});
         if(!r.ok){const d=await r.json();throw new Error(d.error);}
         const d=await r.json();
         url=d.url;
@@ -226,7 +227,7 @@ export function MovieApp() {
       if (recFile) {
         const fd = new FormData();
         fd.append('thumbnail', recFile);
-        const r = await fetch('http://localhost:3000/api/upload', { method: 'POST', body: fd });
+        const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
         if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
         const d = await r.json();
         url = d.url;
@@ -551,7 +552,7 @@ const queryClient = new QueryClient({
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/trpc`,
+      url: `${API_BASE_URL}/trpc`,
       headers() {
         return {
           Authorization: 'Bearer manus-session-token-xyz123',
