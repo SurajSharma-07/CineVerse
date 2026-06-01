@@ -1,7 +1,7 @@
 import { router, protectedProcedure, publicProcedure } from './trpc';
 import { z } from 'zod';
-import { db, mockMovies, isDatabaseConnected, mockRecommendations, saveMockMovies, saveMockRecommendations } from './db';
-import type { MockMovie, MockRecommendation } from './db';
+import { db, mockMovies, isDatabaseConnected, mockRecommendations, mockAbsoluteCinema, saveMockMovies, saveMockRecommendations, saveMockAbsoluteCinema } from './db';
+import type { MockMovie, MockRecommendation, MockAbsoluteCinema } from './db';
 import * as schema from './schema';
 import { eq, and } from 'drizzle-orm';
 import { deleteFromS3 } from './s3';
@@ -12,6 +12,7 @@ const movieInputSchema = z.object({
   thumbnailKey: z.string().nullable(),
   aspectRatio: z.enum(['16:9', '9:16']),
   collection: z.enum(['watched', 'watchLater']),
+  recommendedBy: z.string().nullable().optional(),
 });
 
 const movieEditSchema = z.object({
@@ -21,6 +22,7 @@ const movieEditSchema = z.object({
   thumbnailKey: z.string().nullable().optional(),
   aspectRatio: z.enum(['16:9', '9:16']).optional(),
   collection: z.enum(['watched', 'watchLater']).optional(),
+  recommendedBy: z.string().nullable().optional(),
 });
 
 const recommendationInputSchema = z.object({
@@ -38,6 +40,21 @@ const recommendationEditSchema = z.object({
   thumbnailKey: z.string().nullable().optional(),
   rank: z.number().int().min(1).optional(),
   recommendedBy: z.string().min(1).max(100).optional(),
+});
+
+const absoluteCinemaInputSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(255),
+  thumbnailUrl: z.string().min(1, 'Thumbnail URL is required'),
+  thumbnailKey: z.string().nullable().optional(),
+  rank: z.number().int().min(1),
+});
+
+const absoluteCinemaEditSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1, 'Title is required').max(255).optional(),
+  thumbnailUrl: z.string().min(1).optional(),
+  thumbnailKey: z.string().nullable().optional(),
+  rank: z.number().int().min(1).optional(),
 });
 
 export const appRouter = router({
@@ -75,6 +92,7 @@ export const appRouter = router({
         thumbnailKey: input.thumbnailKey,
         aspectRatio: input.aspectRatio,
         collection: input.collection,
+        recommendedBy: input.recommendedBy || null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -90,6 +108,7 @@ export const appRouter = router({
             thumbnailKey: newMovie.thumbnailKey || null,
             aspectRatio: newMovie.aspectRatio,
             collection: newMovie.collection,
+            recommendedBy: newMovie.recommendedBy,
           });
           return { success: true, movie: newMovie };
         } catch (err) {
@@ -121,6 +140,7 @@ export const appRouter = router({
           if (input.thumbnailKey !== undefined) updateData.thumbnailKey = input.thumbnailKey;
           if (input.aspectRatio) updateData.aspectRatio = input.aspectRatio;
           if (input.collection) updateData.collection = input.collection;
+          if (input.recommendedBy !== undefined) updateData.recommendedBy = input.recommendedBy;
 
           await db.update(schema.movies)
             .set(updateData)
@@ -152,6 +172,7 @@ export const appRouter = router({
         thumbnailKey: input.thumbnailKey !== undefined ? input.thumbnailKey : existing.thumbnailKey,
         aspectRatio: input.aspectRatio ?? existing.aspectRatio,
         collection: input.collection ?? existing.collection,
+        recommendedBy: input.recommendedBy !== undefined ? input.recommendedBy : existing.recommendedBy,
         updatedAt: new Date(),
       };
       saveMockMovies(mockMovies);
@@ -278,6 +299,175 @@ export const appRouter = router({
       saveMockMovies(mockMovies);
       return { success: true, movie };
     }),
+
+  // ==========================================
+  // ABSOLUTE CINEMA SECTION ENDPOINTS
+  // ==========================================
+
+  getAbsoluteCinema: protectedProcedure.query(async ({ ctx }) => {
+    const userId = ctx.user.id;
+    
+    if (isDatabaseConnected && db) {
+      try {
+        console.log(`tRPC: Fetching Absolute Cinema rankings for user ${userId}...`);
+        const results = await db.select().from(schema.absoluteCinema).where(eq(schema.absoluteCinema.userId, userId)).orderBy(schema.absoluteCinema.rank);
+        return results;
+      } catch (err) {
+        console.error('Database query error in getAbsoluteCinema, falling back to mock:', err);
+      }
+    }
+    
+    // In-memory fallback
+    console.log(`tRPC: Fetching mock Absolute Cinema for user ${userId}...`);
+    return mockAbsoluteCinema.filter((rec) => rec.userId === userId).sort((a, b) => a.rank - b.rank);
+  }),
+
+  addAbsoluteCinema: protectedProcedure
+    .input(absoluteCinemaInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.user.id;
+      const recId = Math.random().toString(36).substring(2, 11);
+      
+      const newRec = {
+        id: recId,
+        userId,
+        title: input.title,
+        thumbnailUrl: input.thumbnailUrl,
+        thumbnailKey: input.thumbnailKey || null,
+        rank: input.rank,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      if (isDatabaseConnected && db) {
+        try {
+          console.log('tRPC: Inserting new Absolute Cinema movie into database:', input.title);
+          await db.insert(schema.absoluteCinema).values({
+            id: newRec.id,
+            userId: newRec.userId,
+            title: newRec.title,
+            thumbnailUrl: newRec.thumbnailUrl,
+            thumbnailKey: newRec.thumbnailKey,
+            rank: newRec.rank,
+          });
+          return { success: true, movie: newRec };
+        } catch (err) {
+          console.error('Database error in addAbsoluteCinema, falling back to mock:', err);
+        }
+      }
+
+      // In-memory fallback
+      console.log('tRPC: Saving Absolute Cinema in-memory:', input.title);
+      mockAbsoluteCinema.push(newRec as MockAbsoluteCinema);
+      saveMockAbsoluteCinema(mockAbsoluteCinema);
+      return { success: true, movie: newRec };
+    }),
+
+  editAbsoluteCinema: protectedProcedure
+    .input(absoluteCinemaEditSchema)
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.user.id;
+      
+      if (isDatabaseConnected && db) {
+        try {
+          console.log(`tRPC: Updating Absolute Cinema movie ${input.id} in database...`);
+          const updateData: Partial<typeof schema.absoluteCinema.$inferInsert> = {
+            updatedAt: new Date(),
+          };
+          if (input.title) updateData.title = input.title;
+          if (input.rank !== undefined) updateData.rank = input.rank;
+          if (input.thumbnailUrl) updateData.thumbnailUrl = input.thumbnailUrl;
+          if (input.thumbnailKey !== undefined) updateData.thumbnailKey = input.thumbnailKey;
+
+          await db.update(schema.absoluteCinema)
+            .set(updateData)
+            .where(and(eq(schema.absoluteCinema.id, input.id), eq(schema.absoluteCinema.userId, userId)));
+            
+          return { success: true };
+        } catch (err) {
+          console.error('Database error in editAbsoluteCinema, falling back to mock:', err);
+        }
+      }
+
+      // In-memory fallback
+      console.log(`tRPC: Updating mock Absolute Cinema ${input.id}...`);
+      const recIdx = mockAbsoluteCinema.findIndex((r) => r.id === input.id && r.userId === userId);
+      if (recIdx === -1) {
+        throw new Error('Ranking not found');
+      }
+
+      const existing = mockAbsoluteCinema[recIdx];
+      // Clean up old thumbnail
+      if (input.thumbnailKey && existing.thumbnailKey && existing.thumbnailKey !== input.thumbnailKey) {
+        await deleteFromS3(existing.thumbnailKey);
+      }
+
+      mockAbsoluteCinema[recIdx] = {
+        ...existing,
+        title: input.title ?? existing.title,
+        rank: input.rank ?? existing.rank,
+        thumbnailUrl: input.thumbnailUrl ?? existing.thumbnailUrl,
+        thumbnailKey: input.thumbnailKey !== undefined ? input.thumbnailKey : existing.thumbnailKey,
+        updatedAt: new Date(),
+      };
+      saveMockAbsoluteCinema(mockAbsoluteCinema);
+
+      return { success: true, movie: mockAbsoluteCinema[recIdx] };
+    }),
+
+  deleteAbsoluteCinema: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.user.id;
+      let thumbnailKey: string | null = null;
+      
+      if (isDatabaseConnected && db) {
+        try {
+          const results = await db.select({ key: schema.absoluteCinema.thumbnailKey })
+            .from(schema.absoluteCinema)
+            .where(and(eq(schema.absoluteCinema.id, input.id), eq(schema.absoluteCinema.userId, userId)))
+            .limit(1);
+          if (results.length > 0) {
+            thumbnailKey = results[0].key;
+          }
+        } catch (err) {
+          console.error('Error fetching key in deleteAbsoluteCinema:', err);
+        }
+      } else {
+        const rec = mockAbsoluteCinema.find((r) => r.id === input.id && r.userId === userId);
+        if (rec) {
+          thumbnailKey = rec.thumbnailKey;
+        }
+      }
+
+      if (thumbnailKey) {
+        await deleteFromS3(thumbnailKey);
+      }
+
+      if (isDatabaseConnected && db) {
+        try {
+          console.log(`tRPC: Deleting Absolute Cinema movie ${input.id} from database...`);
+          await db.delete(schema.absoluteCinema)
+            .where(and(eq(schema.absoluteCinema.id, input.id), eq(schema.absoluteCinema.userId, userId)));
+          return { success: true };
+        } catch (err) {
+          console.error('Database query error in deleteAbsoluteCinema:', err);
+        }
+      }
+
+      // Fallback
+      console.log(`tRPC: Deleting mock Absolute Cinema movie ${input.id}...`);
+      const recIdx = mockAbsoluteCinema.findIndex((r) => r.id === input.id && r.userId === userId);
+      if (recIdx !== -1) {
+        mockAbsoluteCinema.splice(recIdx, 1);
+        saveMockAbsoluteCinema(mockAbsoluteCinema);
+      }
+      return { success: true };
+    }),
+
+  // ==========================================
+  // FRIEND RECOMMENDATIONS ENDPOINTS
+  // ==========================================
 
   // Get all ranked recommendations (publicly readable)
   getRecommendations: publicProcedure.query(async () => {

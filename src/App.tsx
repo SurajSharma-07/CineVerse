@@ -8,8 +8,22 @@ import type { Movie } from './components/MovieCard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import { getImageUrl } from './utils/url';
+import MovieImage from './components/MovieImage';
+import { compressImageToBase64 } from './utils/image';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+const getApiUrl = (): string => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    return `${protocol}//${hostname}:3000`;
+  }
+  return 'http://localhost:3000';
+};
+
+const API_BASE_URL = getApiUrl();
 let toastIdCounter = 0;
 const generateToastId = () => `toast-${++toastIdCounter}`;
 
@@ -31,12 +45,16 @@ export function MovieApp() {
     (new URLSearchParams(window.location.search).get('view') === 'friend' || 
      new URLSearchParams(window.location.search).get('share') === 'explorer');
 
-  // Fetch movies and recommendations with 10-second automatic polling
+  // Fetch movies, recommendations, and Absolute Cinema with 10-second automatic polling
   const { data: movies = [], isLoading, error: fetchError } = trpc.getMovies.useQuery(undefined, {
     refetchInterval: 10000,
   });
 
   const { data: recommendations = [], isLoading: isRecsLoading } = trpc.getRecommendations.useQuery(undefined, {
+    refetchInterval: 10000,
+  });
+
+  const { data: absoluteCinema = [], isLoading: isAbsoluteLoading } = trpc.getAbsoluteCinema.useQuery(undefined, {
     refetchInterval: 10000,
   });
 
@@ -47,24 +65,47 @@ export function MovieApp() {
   const titleMut = trpc.editTitle.useMutation({ onSuccess: () => { utils.getMovies.invalidate(); }, onError: (e) => showToast('error', e.message) });
 
   // Absolute Cinema (Top Rank) Mutations
-  const addRecMut = trpc.addRecommendation.useMutation({
+  const addAbsoluteMut = trpc.addAbsoluteCinema.useMutation({
     onSuccess: () => {
-      utils.getRecommendations.invalidate();
+      utils.getAbsoluteCinema.invalidate();
       showToast('success', 'Masterpiece added to rankings!');
-      setRecTitle('');
-      setRecRank(1);
-      setRecFile(null);
-      setRecPreview('');
+      setAbsTitle('');
+      setAbsRank(1);
+      setAbsFile(null);
+      setAbsPreview('');
       setAddRankOpen(false);
     },
     onError: (e) => showToast('error', e.message),
   });
 
-  const editRecMut = trpc.editRecommendation.useMutation({
+  const editAbsoluteMut = trpc.editAbsoluteCinema.useMutation({
     onSuccess: () => {
-      utils.getRecommendations.invalidate();
+      utils.getAbsoluteCinema.invalidate();
       showToast('success', 'Ranking updated successfully!');
       setEditingRecId(null);
+      setEditAbsFile(null);
+      setEditAbsPreview('');
+    },
+    onError: (e) => showToast('error', e.message),
+  });
+
+  const delAbsoluteMut = trpc.deleteAbsoluteCinema.useMutation({
+    onSuccess: () => {
+      utils.getAbsoluteCinema.invalidate();
+      showToast('success', 'Movie removed from rankings.');
+    },
+    onError: (e) => showToast('error', e.message),
+  });
+
+  // Friend Recommendations Mutations
+  const addRecMut = trpc.addRecommendation.useMutation({
+    onSuccess: () => {
+      utils.getRecommendations.invalidate();
+      showToast('success', 'Recommendation submitted successfully!');
+      setRecTitle('');
+      setRecRank(1);
+      setRecPreview('');
+      setRecName('');
     },
     onError: (e) => showToast('error', e.message),
   });
@@ -72,7 +113,7 @@ export function MovieApp() {
   const delRecMut = trpc.deleteRecommendation.useMutation({
     onSuccess: () => {
       utils.getRecommendations.invalidate();
-      showToast('success', 'Movie removed from rankings.');
+      showToast('success', 'Recommendation removed.');
     },
     onError: (e) => showToast('error', e.message),
   });
@@ -87,33 +128,42 @@ export function MovieApp() {
   // Movie Add/Edit Form states
   const [formTitle, setFormTitle] = useState('');
   const [formAR, setFormAR] = useState<'16:9'|'9:16'>('16:9');
-  const [formFile, setFormFileState] = useState<File|null>(null);
   const [formPreview, setFormPreview] = useState('');
   const [uploading, setUploading] = useState(false);
   const [existUrl, setExistUrl] = useState('');
   const [existKey, setExistKey] = useState<string|null>(null);
   const [dragActive, setDragActive] = useState(false);
   
-  // Absolute Cinema (Top Rank) states
+  // Absolute Cinema ADD Form states
+  const [absTitle, setAbsTitle] = useState('');
+  const [absRank, setAbsRank] = useState<number>(1);
+  const [absFile, setAbsFile] = useState<File|null>(null);
+  const [absPreview, setAbsPreview] = useState('');
+  const [absUploading, setAbsUploading] = useState(false);
+
+  // Absolute Cinema EDIT Form states
+  const [editingRecId, setEditingRecId] = useState<string|null>(null);
+  const [editAbsTitle, setEditAbsTitle] = useState('');
+  const [editAbsRank, setEditAbsRank] = useState<number>(1);
+  const [editAbsFile, setEditAbsFile] = useState<File|null>(null);
+  const [editAbsPreview, setEditAbsPreview] = useState('');
+  const [editAbsUploading, setEditAbsUploading] = useState(false);
+
+  // Friend Rec Form states
   const [recTitle, setRecTitle] = useState('');
   const [recRank, setRecRank] = useState<number>(1);
-  const [recFile, setRecFile] = useState<File|null>(null);
   const [recPreview, setRecPreview] = useState('');
   const [recUploading, setRecUploading] = useState(false);
   const [recDragActive, setRecDragActive] = useState(false);
   const [recName, setRecName] = useState('');
 
   const [addRankOpen, setAddRankOpen] = useState(false);
-  const [editingRecId, setEditingRecId] = useState<string|null>(null);
-  const [editRecTitle, setEditRecTitle] = useState('');
-  const [editRecRank, setEditRecRank] = useState<number>(1);
-  const [editRecFile, setEditRecFile] = useState<File|null>(null);
-  const [editRecPreview, setEditRecPreview] = useState('');
-  const [editRecUploading, setEditRecUploading] = useState(false);
 
   const [scrolled, setScrolled] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const recFileRef = useRef<HTMLInputElement>(null);
+  const absFileRef = useRef<HTMLInputElement>(null);
+  const editAbsFileRef = useRef<HTMLInputElement>(null);
   const wlScrollRef = useRef<HTMLDivElement>(null);
   const wScrollRef = useRef<HTMLDivElement>(null);
   const recScrollRef = useRef<HTMLDivElement>(null);
@@ -140,34 +190,42 @@ export function MovieApp() {
 
   useEffect(() => { const h = () => setScrolled(window.scrollY > 60); window.addEventListener('scroll',h); return ()=>window.removeEventListener('scroll',h); }, []);
 
-  const showToast = (type: Toast['type'], message: string) => { const id = generateToastId(); setToasts(p=>[...p,{id,type,message}]); setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),4000); };
+  const showToast = (type: Toast['type'], message: string) => { const id = generateToastId(); setToasts(p=>[...p,{id,type,message}]); setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)), 4000); };
   const scrollTo = () => document.getElementById('collections')?.scrollIntoView({behavior:'smooth'});
-  const openAdd = () => { setEditingMovie(null); setFormTitle(''); setFormAR('16:9'); setFormFileState(null); setFormPreview(''); setExistUrl(''); setExistKey(null); setModalOpen(true); };
-  const openEdit = (m: Movie) => { setEditingMovie(m); setFormTitle(m.title); setFormAR(m.aspectRatio); setFormFileState(null); setFormPreview(getImageUrl(m.thumbnailUrl)); setExistUrl(m.thumbnailUrl); setExistKey(m.thumbnailKey); setModalOpen(true); };
-  const closeModal = () => { setModalOpen(false); setEditingMovie(null); setFormFileState(null); setFormPreview(''); setUploading(false); };
+  const openAdd = () => { setEditingMovie(null); setFormTitle(''); setFormAR('16:9'); setFormPreview(''); setExistUrl(''); setExistKey(null); setModalOpen(true); };
+  const openEdit = (m: Movie) => { setEditingMovie(m); setFormTitle(m.title); setFormAR(m.aspectRatio); setFormPreview(getImageUrl(m.thumbnailUrl)); setExistUrl(m.thumbnailUrl); setExistKey(m.thumbnailKey); setModalOpen(true); };
+  const closeModal = () => { setModalOpen(false); setEditingMovie(null); setFormPreview(''); setUploading(false); };
 
-  const processFile = (f: File, isRec: boolean = false) => {
+  const handleFileSelect = async (f: File, type: 'movie' | 'absolute' | 'editAbsolute' | 'friend') => {
     if(!f.type.startsWith('image/')){showToast('error','Only images allowed!');return;}
-    if(f.size>5*1024*1024){showToast('error','Max 5MB!');return;}
-    if (isRec) {
-      setRecFormFile(f);
-    } else {
-      setFormFile(f);
+    if(f.size > 15 * 1024 * 1024){showToast('error','Max 15MB!');return;}
+    
+    if (type === 'movie') setUploading(true);
+    else if (type === 'absolute') setAbsUploading(true);
+    else if (type === 'editAbsolute') setEditAbsUploading(true);
+    else if (type === 'friend') setRecUploading(true);
+
+    try {
+      const base64 = await compressImageToBase64(f);
+      if (type === 'movie') {
+        setFormPreview(base64);
+      } else if (type === 'absolute') {
+        setAbsPreview(base64);
+        setAbsFile(f);
+      } else if (type === 'editAbsolute') {
+        setEditAbsPreview(base64);
+        setEditAbsFile(f);
+      } else if (type === 'friend') {
+        setRecPreview(base64);
+      }
+    } catch {
+      showToast('error', 'Failed to compress image file');
+    } finally {
+      if (type === 'movie') setUploading(false);
+      else if (type === 'absolute') setAbsUploading(false);
+      else if (type === 'editAbsolute') setEditAbsUploading(false);
+      else if (type === 'friend') setRecUploading(false);
     }
-  };
-
-  const setFormFile = (f: File) => {
-    setFormFileState(f);
-    const r=new FileReader();
-    r.onloadend=()=>setFormPreview(r.result as string);
-    r.readAsDataURL(f);
-  };
-
-  const setRecFormFile = (f: File) => {
-    setRecFile(f);
-    const r=new FileReader();
-    r.onloadend=()=>setRecPreview(r.result as string);
-    r.readAsDataURL(f);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -180,99 +238,80 @@ export function MovieApp() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if(e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0], false);
+    if(e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0], 'movie');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if(!formTitle.trim()){showToast('error','Title required!');return;}
-    if(!formPreview&&!formFile){showToast('error','Upload a thumbnail!');return;}
+    if(!formPreview){showToast('error','Upload a thumbnail!');return;}
     setUploading(true);
     let url=existUrl, key=existKey;
     try {
-      if(formFile){
-        const fd=new FormData();
-        fd.append('thumbnail',formFile);
-        const r=await fetch(`${API_BASE_URL}/api/upload`,{method:'POST',body:fd});
-        if(!r.ok){const d=await r.json();throw new Error(d.error);}
-        const d=await r.json();
-        url=d.url;
-        key=d.key;
+      if (formPreview.startsWith('data:')) {
+        url = formPreview;
+        key = null;
       }
       if(editingMovie) await editMut.mutateAsync({id:editingMovie.id,title:formTitle,thumbnailUrl:url,thumbnailKey:key,aspectRatio:formAR});
       else await addMut.mutateAsync({title:formTitle,thumbnailUrl:url,thumbnailKey:key,aspectRatio:formAR,collection:'watchLater'});
     } catch(err: unknown){ const error = err instanceof Error ? err : new Error(String(err)); showToast('error', error.message || 'Error'); } finally { setUploading(false); }
   };
 
-  // Handle ranking submit (Create)
-  const handleRecSubmit = async (e: React.FormEvent) => {
+  // Handle Absolute Cinema submit (Create)
+  const handleAbsoluteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if(!recTitle.trim()){showToast('error','Movie title is required!');return;}
-    setRecUploading(true);
+    if(!absTitle.trim()){showToast('error','Movie title is required!');return;}
+    setAbsUploading(true);
     
     // Default movie frame if user doesn't upload a keyframe
     let url = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800&auto=format&fit=crop&q=80';
-    let key: string | null = null;
+    const key: string | null = null;
     
     try {
-      if (recFile) {
-        const fd = new FormData();
-        fd.append('thumbnail', recFile);
-        const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
-        if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
-        const d = await r.json();
-        url = d.url;
-        key = d.key;
+      if (absPreview && absPreview.startsWith('data:')) {
+        url = absPreview;
       }
       
-      await addRecMut.mutateAsync({
-        title: recTitle.trim(),
+      await addAbsoluteMut.mutateAsync({
+        title: absTitle.trim(),
         thumbnailUrl: url,
         thumbnailKey: key,
-        rank: recRank,
-        recommendedBy: 'Cinematic Explorer', // Purely user-owned rankings
+        rank: absRank,
       });
     } catch(err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
       showToast('error', error.message || 'Error creating ranked movie');
     } finally {
-      setRecUploading(false);
+      setAbsUploading(false);
     }
   };
 
-  // Handle ranking edit (Update)
-  const handleRecEditSubmit = async (id: string, existUrl: string, existKey: string | null) => {
-    if(!editRecTitle.trim()){showToast('error','Movie title is required!');return;}
-    setEditRecUploading(true);
+  // Handle Absolute Cinema edit (Update)
+  const handleAbsoluteEditSubmit = async (id: string, existUrl: string, existKey: string | null) => {
+    if(!editAbsTitle.trim()){showToast('error','Movie title is required!');return;}
+    setEditAbsUploading(true);
     
     let url = existUrl;
     let key = existKey;
     
     try {
-      if (editRecFile) {
-        const fd = new FormData();
-        fd.append('thumbnail', editRecFile);
-        const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
-        if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
-        const d = await r.json();
-        url = d.url;
-        key = d.key;
+      if (editAbsPreview && editAbsPreview.startsWith('data:')) {
+        url = editAbsPreview;
+        key = null;
       }
       
-      await editRecMut.mutateAsync({
+      await editAbsoluteMut.mutateAsync({
         id,
-        title: editRecTitle.trim(),
-        rank: editRecRank,
+        title: editAbsTitle.trim(),
+        rank: editAbsRank,
         thumbnailUrl: url,
         thumbnailKey: key,
       });
-      setEditRecFile(null);
-      setEditRecPreview('');
     } catch(err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
       showToast('error', error.message || 'Error updating ranked movie');
     } finally {
-      setEditRecUploading(false);
+      setEditAbsUploading(false);
     }
   };
 
@@ -283,7 +322,7 @@ export function MovieApp() {
   const scrollCarousel = (ref: React.RefObject<HTMLDivElement|null>, dir: 'left'|'right') => { ref.current?.scrollBy({left:dir==='left'?-600:600,behavior:'smooth'}); };
 
   // Admin: Approve a friend recommendation (add to Watch Later, then remove rec)
-  const handleApproveRec = async (rec: any) => {
+  const handleApproveRec = async (rec: { id: string; title: string; thumbnailUrl: string; thumbnailKey: string | null; recommendedBy: string }) => {
     try {
       await addMut.mutateAsync({
         title: rec.title,
@@ -291,9 +330,10 @@ export function MovieApp() {
         thumbnailKey: rec.thumbnailKey,
         aspectRatio: '16:9',
         collection: 'watchLater',
+        recommendedBy: rec.recommendedBy, // <--- PROUD FRIEND ATTRIBUTION!
       });
       await delRecMut.mutateAsync({ id: rec.id });
-      showToast('success', `"${rec.title}" added to Watch Later!`);
+      showToast('success', `"${rec.title}" approved and added to Watch Later!`);
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
       showToast('error', error.message || 'Failed to approve recommendation');
@@ -398,15 +438,15 @@ export function MovieApp() {
             {addRankOpen && !isReadOnly && (
               <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} className="glassmorphism rounded-2xl border border-white/10 p-5 mb-8 flex flex-col gap-4">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5"><Plus className="w-4 h-4 text-red-500" /> Add Movie to Rankings</h3>
-                <form onSubmit={handleRecSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                <form onSubmit={handleAbsoluteSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                   <div className="md:col-span-4 flex flex-col gap-1.5">
                     <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Movie Title</label>
-                    <input type="text" required placeholder="e.g. Inception" value={recTitle} onChange={e=>setRecTitle(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-red-500 transition-all" />
+                    <input type="text" required placeholder="e.g. Inception" value={absTitle} onChange={e=>setAbsTitle(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-red-500 transition-all" />
                   </div>
 
                   <div className="md:col-span-3 flex flex-col gap-1.5">
                     <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Pick Rank</label>
-                    <select value={recRank} onChange={e=>setRecRank(Number(e.target.value))} className="w-full bg-bg-card border border-white/5 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-red-500 transition-all">
+                    <select value={absRank} onChange={e=>setAbsRank(Number(e.target.value))} className="w-full bg-bg-card border border-white/5 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-red-500 transition-all">
                       {Array.from({length: 29}, (_, i) => i + 1).map(num => (
                         <option key={num} value={num}>🏆 Rank #{num}</option>
                       ))}
@@ -415,16 +455,16 @@ export function MovieApp() {
 
                   <div className="md:col-span-3 flex flex-col gap-1.5">
                     <label className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Keyframe Poster (Optional)</label>
-                    <div onClick={()=>recFileRef.current?.click()} className="w-full bg-white/5 border border-dashed border-white/10 hover:border-red-500/50 rounded-xl px-3 py-2 text-gray-500 text-center cursor-pointer transition-all truncate text-[10px] font-semibold flex items-center justify-center gap-1.5 h-[34px]">
-                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], true)}} className="hidden" />
-                      {recPreview ? <img src={recPreview} alt="" className="w-6 h-4 object-cover rounded" /> : <UploadCloud className="w-3.5 h-3.5 text-red-500" />}
-                      <span>{recFile ? recFile.name : 'Upload Poster'}</span>
+                    <div onClick={()=>absFileRef.current?.click()} className="w-full bg-white/5 border border-dashed border-white/10 hover:border-red-500/50 rounded-xl px-3 py-2 text-gray-500 text-center cursor-pointer transition-all truncate text-[10px] font-semibold flex items-center justify-center gap-1.5 h-[34px]">
+                      <input ref={absFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])handleFileSelect(e.target.files[0], 'absolute')}} className="hidden" />
+                      {absPreview ? <img src={absPreview} alt="" className="w-6 h-4 object-cover rounded" /> : <UploadCloud className="w-3.5 h-3.5 text-red-500" />}
+                      <span>{absFile ? absFile.name : 'Upload Poster'}</span>
                     </div>
                   </div>
 
                   <div className="md:col-span-2">
-                    <button type="submit" disabled={recUploading} className="w-full bg-gradient-to-r from-red-600 to-neon-pink text-white font-bold py-2 rounded-xl border border-white/10 shadow-neon-pink flex items-center justify-center gap-1.5 cursor-pointer text-xs disabled:opacity-50 transition-all h-[34px]">
-                      {recUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    <button type="submit" disabled={absUploading} className="w-full bg-gradient-to-r from-red-600 to-neon-pink text-white font-bold py-2 rounded-xl border border-white/10 shadow-neon-pink flex items-center justify-center gap-1.5 cursor-pointer text-xs disabled:opacity-50 transition-all h-[34px]">
+                      {absUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                       <span>Add</span>
                     </button>
                   </div>
@@ -433,13 +473,13 @@ export function MovieApp() {
             )}
 
             {/* Rankings Stack */}
-            {isRecsLoading ? (
+            {isAbsoluteLoading ? (
               <div className="flex justify-center py-16"><RefreshCw className="w-7 h-7 text-neon-purple animate-spin" /></div>
-            ) : recommendations.length === 0 ? (
+            ) : absoluteCinema.length === 0 ? (
               <div className="glassmorphism rounded-2xl p-12 text-center border border-white/5 flex flex-col items-center justify-center"><Trophy className="w-10 h-10 text-gray-600 mb-3 animate-pulse" /><h3 className="text-base font-bold text-gray-300 mb-1">No ranked movies yet</h3><p className="text-sm text-gray-500">Curations are waiting. Crown your favorite movies as Absolute Cinema!</p></div>
             ) : (
               <div className="flex flex-col gap-2">
-                {[...recommendations].sort((a: any, b: any) => a.rank - b.rank).map((rec: any, index: number) => {
+                {[...absoluteCinema].sort((a, b) => a.rank - b.rank).map((rec, index) => {
                   const isEditing = editingRecId === rec.id;
                   
                   return (
@@ -464,8 +504,8 @@ export function MovieApp() {
                         </div>
 
                         {/* Thumbnail (Aspect Ratio Protected) */}
-                        <div className="w-12 h-8 rounded overflow-hidden bg-black/40 border border-white/5 shrink-0">
-                          <img src={getImageUrl(rec.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
+                        <div className="w-12 h-8 rounded overflow-hidden bg-black/40 border border-white/5 shrink-0 flex items-center justify-center">
+                          <MovieImage src={rec.thumbnailUrl} alt={rec.title} className="w-full h-full object-cover" />
                         </div>
 
                         {/* Details */}
@@ -474,15 +514,15 @@ export function MovieApp() {
                             <input 
                               type="text" 
                               required 
-                              value={editRecTitle} 
-                              onChange={e=>setEditRecTitle(e.target.value)} 
+                              value={editAbsTitle} 
+                              onChange={e=>setEditAbsTitle(e.target.value)} 
                               className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-white text-xs focus:outline-none focus:border-red-500 min-w-[160px]" 
                             />
                             <div className="flex items-center gap-2">
                               <span className="text-[9px] font-black text-gray-500 uppercase">Rank:</span>
                               <select 
-                                value={editRecRank} 
-                                onChange={e=>setEditRecRank(Number(e.target.value))} 
+                                value={editAbsRank} 
+                                onChange={e=>setEditAbsRank(Number(e.target.value))} 
                                 className="bg-bg-card border border-white/5 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-red-500"
                               >
                                 {Array.from({length: 29}, (_, i) => i + 1).map(num => (
@@ -492,16 +532,16 @@ export function MovieApp() {
                             </div>
                             
                             {/* Edit Thumbnail */}
-                            <div onClick={()=>fileRef.current?.click()} className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg px-2 py-1 text-gray-400 text-[10px] cursor-pointer flex items-center gap-1">
-                              <input ref={fileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0]) { setEditRecFile(e.target.files[0]); const r=new FileReader(); r.onloadend=()=>setEditRecPreview(r.result as string); r.readAsDataURL(e.target.files[0]); }}} className="hidden" />
-                              {editRecPreview ? <img src={editRecPreview} alt="" className="w-5 h-3.5 object-cover rounded" /> : <UploadCloud className="w-3 h-3 text-red-500" />}
-                              <span>{editRecFile ? 'Replaced' : 'Poster'}</span>
+                            <div onClick={()=>editAbsFileRef.current?.click()} className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg px-2 py-1 text-gray-400 text-[10px] cursor-pointer flex items-center gap-1">
+                              <input ref={editAbsFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0]) { handleFileSelect(e.target.files[0], 'editAbsolute'); }}} className="hidden" />
+                              {editAbsPreview ? <img src={editAbsPreview} alt="" className="w-5 h-3.5 object-cover rounded" /> : <UploadCloud className="w-3 h-3 text-red-500" />}
+                              <span>{editAbsFile ? 'Replaced' : 'Poster'}</span>
                             </div>
                           </div>
                         ) : (
                           <div className="flex flex-col min-w-0">
                             <h4 className="text-sm font-bold text-white font-display truncate leading-snug">{rec.title}</h4>
-                            <span className="text-[9px] font-medium text-gray-500 uppercase tracking-widest mt-0.5">Absolute Cinema Log</span>
+                            <span className="text-[9px] font-medium text-gray-500 uppercase tracking-widest mt-0.5">Absolute Cinema Curated</span>
                           </div>
                         )}
                       </div>
@@ -513,11 +553,11 @@ export function MovieApp() {
                         ) : isEditing ? (
                           <div className="flex items-center gap-1.5">
                             <button 
-                              onClick={() => handleRecEditSubmit(rec.id, rec.thumbnailUrl, rec.thumbnailKey)}
-                              disabled={editRecUploading}
+                              onClick={() => handleAbsoluteEditSubmit(rec.id, rec.thumbnailUrl, rec.thumbnailKey)}
+                              disabled={editAbsUploading}
                               className="px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1"
                             >
-                              {editRecUploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              {editAbsUploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                               <span>Save</span>
                             </button>
                             <button 
@@ -530,14 +570,14 @@ export function MovieApp() {
                         ) : (
                           <div className="flex items-center gap-1">
                             <button 
-                              onClick={() => { setEditingRecId(rec.id); setEditRecTitle(rec.title); setEditRecRank(rec.rank); setEditRecFile(null); setEditRecPreview(''); }}
+                              onClick={() => { setEditingRecId(rec.id); setEditAbsTitle(rec.title); setEditAbsRank(rec.rank); setEditAbsFile(null); setEditAbsPreview(''); }}
                               className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400 flex items-center justify-center transition-all border border-white/5 cursor-pointer"
                               title="Edit Rank"
                             >
                               <Plus className="w-3.5 h-3.5 rotate-45 shrink-0" />
                             </button>
                             <button 
-                              onClick={() => { if(confirm(`Remove "${rec.title}" from rankings?`)) delRecMut.mutate({id: rec.id}); }}
+                              onClick={() => { if(confirm(`Remove "${rec.title}" from absolute rankings?`)) delAbsoluteMut.mutate({id: rec.id}); }}
                               className="w-7 h-7 rounded-lg bg-white/5 hover:bg-red-600 text-gray-400 hover:text-white flex items-center justify-center transition-all border border-white/5 cursor-pointer"
                               title="Remove"
                             >
@@ -596,12 +636,12 @@ export function MovieApp() {
                 <div className="relative group/rec-car">
                   <button onClick={()=>scrollCarousel(recScrollRef,'left')} className="absolute left-0 top-0 bottom-0 z-20 w-12 bg-gradient-to-r from-bg-dark to-transparent flex items-center justify-center opacity-0 group-hover/rec-car:opacity-100 transition-opacity cursor-pointer"><ChevronLeft className="w-7 h-7 text-white" /></button>
                   <div ref={recScrollRef} className="flex gap-5 overflow-x-auto scrollbar-hide scroll-smooth pb-4">
-                    {[...recommendations].sort((a: any, b: any) => a.rank - b.rank).map((rec: any, i: number) => (
+                    {[...recommendations].sort((a, b) => a.rank - b.rank).map((rec, i) => (
                       <motion.div key={rec.id} initial={{opacity:0,scale:0.85,y:30}} whileInView={{opacity:1,scale:1,y:0}} viewport={{once:true}} transition={{duration:0.4,delay:i*0.08}}
                         className="relative bg-bg-card rounded-2xl overflow-hidden border border-white/5 shadow-md flex-shrink-0 w-[240px] group flex flex-col cursor-pointer transition-all hover:border-neon-blue/30">
                         {/* Thumbnail */}
                         <div className="relative aspect-video overflow-hidden bg-black/40">
-                          <img src={getImageUrl(rec.thumbnailUrl)} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                          <MovieImage src={rec.thumbnailUrl} alt={rec.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
                           {/* Rank Badge */}
                           <div className={`absolute top-2 left-2 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase ${
                             rec.rank === 1 ? 'bg-yellow-500/20 border-yellow-500/60 text-yellow-400' : rec.rank === 2 ? 'bg-slate-300/20 border-slate-300/60 text-slate-200' : rec.rank === 3 ? 'bg-amber-700/20 border-amber-700/60 text-amber-500' : 'bg-white/5 border-white/10 text-gray-400'
@@ -652,15 +692,10 @@ export function MovieApp() {
                   if(!recTitle.trim()){showToast('error','Movie title is required!');return;}
                   setRecUploading(true);
                   let url = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800&auto=format&fit=crop&q=80';
-                  let key: string | null = null;
+                  const key: string | null = null;
                   try {
-                    if (recFile) {
-                      const fd = new FormData();
-                      fd.append('thumbnail', recFile);
-                      const r = await fetch(`${API_BASE_URL}/api/upload`, { method: 'POST', body: fd });
-                      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
-                      const d = await r.json();
-                      url = d.url; key = d.key;
+                    if (recPreview && recPreview.startsWith('data:')) {
+                      url = recPreview;
                     }
                     await addRecMut.mutateAsync({ title: recTitle.trim(), thumbnailUrl: url, thumbnailKey: key, rank: recRank, recommendedBy: recName.trim() });
                     setRecName('');
@@ -690,9 +725,9 @@ export function MovieApp() {
 
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Upload keyframe (Optional)</label>
-                    <div onDragEnter={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragOver={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragLeave={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false)}} onDrop={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false);if(e.dataTransfer.files?.[0])processFile(e.dataTransfer.files[0], true)}} onClick={()=>recFileRef.current?.click()}
+                    <div onDragEnter={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragOver={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(true)}} onDragLeave={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false)}} onDrop={e=>{e.preventDefault();e.stopPropagation();setRecDragActive(false);if(e.dataTransfer.files?.[0])handleFileSelect(e.dataTransfer.files[0], 'friend')}} onClick={()=>recFileRef.current?.click()}
                       className={`relative w-full border border-dashed rounded-xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center p-4 min-h-[90px] ${recDragActive?'border-neon-blue bg-neon-blue/10':'border-white/5 bg-white/5 hover:border-white/20'}`}>
-                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], true)}} className="hidden" />
+                      <input ref={recFileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])handleFileSelect(e.target.files[0], 'friend')}} className="hidden" />
                       {recPreview ? <div className="absolute inset-0"><img src={recPreview} alt="" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity"><UploadCloud className="w-4 h-4 mr-1.5" />Replace</div></div>
                       : <div className="flex flex-col items-center text-gray-500 p-2"><UploadCloud className="w-5 h-5 text-neon-blue mb-1" /><span className="text-[10px] font-semibold text-white mb-0.5">Drop frame image here</span><span className="text-[9px] text-gray-600">JPEG, PNG (Max 5MB)</span></div>}
                     </div>
@@ -734,7 +769,7 @@ export function MovieApp() {
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Thumbnail</label>
                 <div onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop} onClick={()=>fileRef.current?.click()}
                   className={`relative w-full border-2 border-dashed rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center p-6 ${dragActive?'border-neon-purple bg-neon-purple/10':'border-white/10 bg-white/5 hover:border-white/20'} ${formAR==='16:9'?'aspect-video':'aspect-[9/14] max-w-[220px] mx-auto'}`}>
-                  <input ref={fileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])processFile(e.target.files[0], false)}} className="hidden" />
+                  <input ref={fileRef} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])handleFileSelect(e.target.files[0], 'movie')}} className="hidden" />
                   {formPreview ? <div className="absolute inset-0"><img src={formPreview} alt="" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-sm font-semibold transition-opacity"><UploadCloud className="w-5 h-5 mr-2" />Replace</div></div>
                   : <div className="flex flex-col items-center text-gray-400 p-4"><UploadCloud className="w-8 h-8 text-neon-purple mb-2 animate-bounce" /><span className="text-sm font-medium text-white mb-1">Drop file here</span><span className="text-xs text-gray-500">JPEG, PNG, WEBP (Max 5MB)</span></div>}
                 </div>

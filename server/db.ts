@@ -21,6 +21,7 @@ export interface MockMovie {
   thumbnailKey: string | null;
   aspectRatio: '16:9' | '9:16';
   collection: 'watched' | 'watchLater';
+  recommendedBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +44,17 @@ export interface MockRecommendation {
   createdAt: Date;
 }
 
+export interface MockAbsoluteCinema {
+  id: string;
+  userId: string;
+  title: string;
+  thumbnailUrl: string;
+  thumbnailKey: string | null;
+  rank: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export const mockUsers: MockUser[] = [
   {
     id: 'manus-user',
@@ -56,6 +68,7 @@ export const mockUsers: MockUser[] = [
 // JSON Local persistence files
 const MOVIES_FILE = path.join(process.cwd(), 'movies.json');
 const RECS_FILE = path.join(process.cwd(), 'recommendations.json');
+const ABSOLUTE_CINEMA_FILE = path.join(process.cwd(), 'absolute_cinema.json');
 
 const defaultMovies: MockMovie[] = [
   {
@@ -114,6 +127,29 @@ const defaultRecommendations: MockRecommendation[] = [
   }
 ];
 
+const defaultAbsoluteCinema: MockAbsoluteCinema[] = [
+  {
+    id: 'abs-1',
+    userId: 'manus-user',
+    title: 'Interstellar',
+    thumbnailUrl: '/thumbnails/interstellar.png',
+    thumbnailKey: null,
+    rank: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'abs-2',
+    userId: 'manus-user',
+    title: 'The Dark Knight',
+    thumbnailUrl: '/thumbnails/dark_knight.png',
+    thumbnailKey: null,
+    rank: 2,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+];
+
 interface JSONMovie {
   id: string;
   userId: string;
@@ -122,6 +158,7 @@ interface JSONMovie {
   thumbnailKey: string | null;
   aspectRatio: '16:9' | '9:16';
   collection: 'watched' | 'watchLater';
+  recommendedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -134,6 +171,17 @@ interface JSONRecommendation {
   rank: number;
   recommendedBy: string;
   createdAt: string;
+}
+
+interface JSONAbsoluteCinema {
+  id: string;
+  userId: string;
+  title: string;
+  thumbnailUrl: string;
+  thumbnailKey: string | null;
+  rank: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Persistent Load Helpers
@@ -188,9 +236,36 @@ export function saveMockRecommendations(recs: MockRecommendation[]) {
   }
 }
 
+export function loadMockAbsoluteCinema(): MockAbsoluteCinema[] {
+  try {
+    if (fs.existsSync(ABSOLUTE_CINEMA_FILE)) {
+      const data = fs.readFileSync(ABSOLUTE_CINEMA_FILE, 'utf8');
+      const parsed = JSON.parse(data) as JSONAbsoluteCinema[];
+      return parsed.map((a: JSONAbsoluteCinema) => ({
+        ...a,
+        createdAt: new Date(a.createdAt),
+        updatedAt: new Date(a.updatedAt),
+      }));
+    }
+  } catch (err) {
+    console.error('Failed to load local absolute_cinema.json, using defaults:', err);
+  }
+  saveMockAbsoluteCinema(defaultAbsoluteCinema);
+  return [...defaultAbsoluteCinema];
+}
+
+export function saveMockAbsoluteCinema(abs: MockAbsoluteCinema[]) {
+  try {
+    fs.writeFileSync(ABSOLUTE_CINEMA_FILE, JSON.stringify(abs, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save local absolute_cinema.json:', err);
+  }
+}
+
 // Instantiate active mock data loaded from JSON
 export const mockMovies: MockMovie[] = loadMockMovies();
 export const mockRecommendations: MockRecommendation[] = loadMockRecommendations();
+export const mockAbsoluteCinema: MockAbsoluteCinema[] = loadMockAbsoluteCinema();
 
 export async function initDatabase() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -198,6 +273,47 @@ export async function initDatabase() {
     try {
       console.log('Connecting to MySQL/TiDB database...');
       const pool = mysql.createPool(databaseUrl);
+      
+      // Perform database self-healing checks
+      try {
+        console.log('Running self-healing checks on schema...');
+        // 1. Ensure recommended_by column exists in movies
+        try {
+          await pool.query("ALTER TABLE `movies` ADD COLUMN `recommended_by` VARCHAR(255) NULL;");
+          console.log('[Self-healing] Successfully added recommended_by column to movies table.');
+        } catch (colErr: unknown) {
+          const err = colErr as { errno?: number; sqlState?: string };
+          // Ignore if column already exists (errno 1060 or sqlState 42S21)
+          if (err.errno !== 1060 && err.sqlState !== '42S21') {
+            console.error('[Self-healing] Error ensuring recommended_by column:', colErr);
+          } else {
+            console.log('[Self-healing] Column recommended_by already exists on movies.');
+          }
+        }
+
+        // 2. Ensure absolute_cinema table exists
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS \`absolute_cinema\` (
+              \`id\` VARCHAR(255) PRIMARY KEY,
+              \`user_id\` VARCHAR(255) NOT NULL,
+              \`title\` VARCHAR(255) NOT NULL,
+              \`thumbnail_url\` TEXT NOT NULL,
+              \`thumbnail_key\` VARCHAR(255) NULL,
+              \`rank\` INT NOT NULL,
+              \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              \`updated_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              FOREIGN KEY (\`user_id\`) REFERENCES \`users\`(\`id\`) ON DELETE CASCADE
+            );
+          `);
+          console.log('[Self-healing] Successfully ensured absolute_cinema table exists.');
+        } catch (tblErr) {
+          console.error('[Self-healing] Error ensuring absolute_cinema table exists:', tblErr);
+        }
+      } catch (selfHealErr) {
+        console.error('Self-healing failed:', selfHealErr);
+      }
+
       db = drizzle(pool, { schema, mode: 'default' });
       isDatabaseConnected = true;
       console.log('Successfully connected to MySQL/TiDB database via Drizzle ORM!');

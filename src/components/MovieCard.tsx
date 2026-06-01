@@ -1,6 +1,6 @@
 import React from 'react';
-import { Edit2, Trash2, ArrowLeftRight, Check, X, Clock, RefreshCw } from 'lucide-react';
-import { getImageUrl } from '../utils/url';
+import { Edit2, Trash2, ArrowLeftRight, Check, X, Clock, RefreshCw, User } from 'lucide-react';
+import MovieImage from './MovieImage';
 
 interface Movie {
   id: string;
@@ -10,6 +10,7 @@ interface Movie {
   thumbnailKey: string | null;
   aspectRatio: '16:9' | '9:16';
   collection: 'watched' | 'watchLater';
+  recommendedBy?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -75,11 +76,11 @@ export default function MovieCard({
 
       {/* Thumbnail */}
       <div className={`relative overflow-hidden w-full bg-black/40 ${isLandscape ? 'aspect-video' : 'aspect-[9/14]'}`}>
-        <img
-          src={getImageUrl(movie.thumbnailUrl)}
+        <MovieImage
+          src={movie.thumbnailUrl}
           alt={movie.title}
+          aspectRatio={movie.aspectRatio}
           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-          loading="lazy"
         />
         <span className={`absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide ${
           isLandscape
@@ -129,6 +130,15 @@ export default function MovieCard({
             {movie.title}
           </h3>
         )}
+
+        {/* Friend Attribution Badge */}
+        {movie.recommendedBy && (
+          <div className="flex items-center gap-1 text-[9px] font-extrabold text-neon-blue uppercase bg-neon-blue/10 border border-neon-blue/20 px-2 py-0.5 rounded-md self-start tracking-wider truncate max-w-full" title={`Recommended by ${movie.recommendedBy}`}>
+            <User className="w-2.5 h-2.5 shrink-0 text-neon-cyan animate-pulse" />
+            <span className="truncate">Friend: {movie.recommendedBy}</span>
+          </div>
+        )}
+
         <div className="flex justify-between items-center text-[10px] text-gray-500 font-medium">
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" />

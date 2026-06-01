@@ -15,8 +15,20 @@ export const getImageUrl = (url: string | null | undefined): string => {
     return url;
   }
   
-  // Retrieve the backend API URL from the Vite environment variable
-  const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+  // Retrieve the backend API URL from the Vite environment variable or determine dynamically
+  const getDynamicApiUrl = (): string => {
+    if (import.meta.env.VITE_API_URL) {
+      return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+    }
+    if (typeof window !== 'undefined') {
+      const protocol = window.location.protocol;
+      const hostname = window.location.hostname;
+      return `${protocol}//${hostname}:3000`;
+    }
+    return 'http://localhost:3000';
+  };
+
+  const apiUrl = getDynamicApiUrl();
   
   // Clean the relative path
   const relativePath = url.startsWith('/') ? url : `/${url}`;

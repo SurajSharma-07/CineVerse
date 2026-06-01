@@ -30,3 +30,7 @@ dist-ssr
 # Local SQLite / Local JSON persistence database files
 movies.json
 recommendations.json
+absolute_cinema.json
+
+# Local Uploads directory
+public/uploads/*

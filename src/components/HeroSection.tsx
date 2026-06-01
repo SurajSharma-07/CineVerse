@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Play, Plus, Star, ChevronDown, Sparkles } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import type { Movie } from './MovieCard';
-import { getImageUrl } from '../utils/url';
+import MovieImage from './MovieImage';
 
 interface HeroProps {
   featuredMovie: Movie | null;
@@ -31,7 +31,7 @@ export default function HeroSection({ featuredMovie, onBrowse, onAdd, isReadOnly
       {/* Parallax Background */}
       <motion.div style={isMobile ? {} : { y: imgY, scale: imgScale }} className={isMobile ? "absolute inset-0 w-full h-full pointer-events-none" : "absolute inset-[-10%] w-[120%] h-[120%] pointer-events-none"}>
         {featuredMovie ? (
-          <img src={getImageUrl(featuredMovie.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
+          <MovieImage src={featuredMovie.thumbnailUrl} alt={featuredMovie.title} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-neon-purple/20 via-bg-dark to-neon-blue/10" />
         )}
